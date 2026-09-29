@@ -54,9 +54,10 @@ function tenure(startISO){
 }
 async function loadAndRender(){
   show('loading');
-  const [emp, periods, teamMembers] = await Promise.all([
-    sb.rpc('hr_employee_list'), sb.rpc('hr_register_periods'), sb.rpc('hr_team_member_list')
+  const [emp, periods, teamMembers, counts] = await Promise.all([
+    sb.rpc('hr_employee_list'), sb.rpc('hr_register_periods'), sb.rpc('hr_team_member_list'), sb.rpc('hr_feedback_counts')
   ]);
+  const fbCounts={}; (counts.data||[]).forEach(r=>{ if(r.employee_id) fbCounts[r.employee_id]=Number(r.n); });
   const employees = emp.data||[];
   const period = (periods.data||[])[0];
   let regRows=[];
@@ -74,6 +75,7 @@ async function loadAndRender(){
     const r = regByEmp[e.employee_id];
     return {
       key: e.last_name.replace(/\s+/g,''),
+      id: e.employee_id,
       first: e.first_name, last: e.last_name, title: e.title||'—',
       dept: e.department || e.department_text || 'Unassigned',
       start: e.employee_start_date, end: e.employee_end_date,
@@ -85,7 +87,7 @@ async function loadAndRender(){
   };
   DATA = {
     active: active.map(norm), departed: departed.map(norm),
-    period, teamMembers: teamMembers.data||[],
+    period, teamMembers: teamMembers.data||[], fbCounts,
     syncedAt: employees.reduce((mx,e)=> e.synced_at>mx?e.synced_at:mx, ''),
   };
   show('app'); renderRoster();
@@ -108,9 +110,11 @@ function fmtDate(d){ return d? new Date(d).toLocaleDateString('en-CA',{year:'num
 function card(e,gone){
   const badge = gone?`<span class="goneflag">${e.reason||'departed'}</span>`:(e.review?'<span class="duebadge">review due</span>':'');
   const meta = gone? `${e.title} · left ${fmtDate(e.end)}` : `${e.title} · ${e.tenure} tenure`;
+  const fbn=(DATA&&DATA.fbCounts&&DATA.fbCounts[e.id])||0;
+  const fbbtn=`<button class="fbbtn" data-fb="${e.id}" data-nm="${e.first} ${e.last}">💬 Feedback${fbn?`<span class="cnt">${fbn}</span>`:''}</button>`;
   return `<div class="ecard ${gone?'gone':(e.review?'due':'')}" data-k="${e.key}">${badge}
     <div class="nm">${e.first} ${e.last}</div><div class="rl">${e.dept}</div>
-    <div class="meta">${meta}</div>${fmtReg(e.reg)}</div>`;
+    <div class="meta">${meta}</div>${fmtReg(e.reg)}${fbbtn}</div>`;
 }
 function renderRoster(){
   const p=DATA.period||{};
@@ -148,6 +152,7 @@ function renderRoster(){
     ds.innerHTML=`<summary>Recently departed (${DATA.departed.length})</summary><div class="grid" style="margin-top:6px">`+DATA.departed.map(e=>card(e,true)).join('')+`</div>`;
     ds.querySelectorAll('.ecard').forEach(c=>c.onclick=()=>openDetail(c.dataset.k));
   } else ds.innerHTML='';
+  document.querySelectorAll('.fbbtn').forEach(b=>{ b.onclick=(ev)=>{ ev.stopPropagation(); openFeedback(b.dataset.fb, b.dataset.nm); }; });
   window.scrollTo(0,0);
 }
 function metric(n,l,cls){return `<div class="metric"><div class="n ${cls||''}">${n}</div><div class="l">${l}</div></div>`;}
@@ -174,7 +179,7 @@ function dailyTable(r){
 function openDetail(k){
   const e = DATA.active.find(x=>x.key===k) || DATA.departed.find(x=>x.key===k); if(!e) return;
   const rv = REVIEWS[k] && (e.review || (e.reason)) ? REVIEWS[k] : null;
-  const dv=$('#detailview'); let html=`<button class="backbtn" id="back">← Back to roster</button>`;
+  const dv=$('#detailview'); let html=`<button class="backbtn" id="back">← Back to roster</button> <button class="backbtn" id="detailfb" style="background:var(--yellow);color:var(--black)">💬 Feedback</button>`;
   if(e.end) html+=`<div class="departbanner"><b>${e.reason||'Departed'} — last day ${fmtDate(e.end)}.</b> Kept for records; no longer on the active roster.</div>`;
   if(rv){
     html+=`<div class="card"><p class="empname">${e.first} ${e.last}</p><p class="emprole">${e.title} &middot; ${e.dept} &middot; <a href="mailto:${e.email||''}">${e.email||''}</a></p>
@@ -197,7 +202,51 @@ function openDetail(k){
   $('#appview').classList.add('hidden'); $('#departsec')&&null;
   dv.classList.remove('hidden'); dv.innerHTML=html;
   $('#back').onclick=()=>{ dv.classList.add('hidden'); $('#appview').classList.remove('hidden'); window.scrollTo(0,0); };
+  $('#detailfb').onclick=()=>openFeedback(e.id, `${e.first} ${e.last}`);
   window.scrollTo(0,0);
 }
+// ---------- feedback (per-employee, mirrored to the Dynamics notepad) ----------
+let FB_EMP=null;
+function fbEsc(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fbStat(s){ return s==='created'?'in Dynamics':(s==='failed'?'sync pending':'saving…'); }
+async function openFeedback(id,name){
+  if(!id) return;
+  FB_EMP=id;
+  $('#fbtitle').textContent=name||'Feedback';
+  $('#fbsub').textContent='Saved to this employee’s Dynamics notepad (reason: Feedback).';
+  $('#fbtopic').value=''; $('#fbtext').value=''; $('#fbmsg').textContent=''; $('#fbmsg').className='msg';
+  $('#fblist').innerHTML='<div class="empty">Loading…</div>';
+  $('#fbmodal').classList.remove('hidden');
+  await loadFeedback(id);
+}
+async function loadFeedback(id){
+  const { data, error } = await sb.rpc('hr_feedback_list',{p_employee_id:id});
+  if(error){ $('#fblist').innerHTML='<div class="empty">Couldn’t load feedback.</div>'; return; }
+  const rows=data||[];
+  $('#fblist').innerHTML = rows.length ? rows.map(r=>{
+    const when=new Date(r.created_at).toLocaleDateString('en-CA',{year:'numeric',month:'short',day:'numeric'});
+    return `<div class="fbitem"><div class="m">${when} · ${fbEsc(r.author_name||r.author_email||'HR')}<span class="st ${r.dynamics_status}">${fbStat(r.dynamics_status)}</span></div>${r.topic?`<div class="t"><b>${fbEsc(r.topic)}</b></div>`:''}<div class="t">${fbEsc(r.body)}</div></div>`;
+  }).join('') : '<div class="empty">No feedback yet — be the first to add some.</div>';
+}
+function closeFeedback(){ $('#fbmodal').classList.add('hidden'); FB_EMP=null; }
+$('#fbclose').onclick=closeFeedback;
+$('#fbmodal').onclick=(ev)=>{ if(ev.target.id==='fbmodal') closeFeedback(); };
+$('#fbsubmit').onclick=async ()=>{
+  if(!FB_EMP) return;
+  const body=$('#fbtext').value.trim(), topic=$('#fbtopic').value.trim(), msg=$('#fbmsg');
+  if(!body){ msg.className='msg err'; msg.textContent='Write some feedback first.'; return; }
+  $('#fbsubmit').disabled=true; msg.className='msg'; msg.textContent='Saving…';
+  let res; try{ res=await sb.functions.invoke('hr-feedback',{ body:{ employee_id:FB_EMP, topic, body } }); }catch(e){ res={ error:e }; }
+  $('#fbsubmit').disabled=false;
+  const d=res&&res.data;
+  if((res&&res.error) || !d || (d.ok===false && !d.saved)){ msg.className='msg err'; msg.textContent='Could not save — please try again.'; return; }
+  if(d.ok===false && d.saved){ msg.className='msg ok'; msg.textContent='Saved ✓ — Dynamics sync is pending; it will appear on the notepad shortly.'; }
+  else { msg.className='msg ok'; msg.textContent='Saved to the notepad ✓'; }
+  $('#fbtopic').value=''; $('#fbtext').value='';
+  if(DATA&&DATA.fbCounts){ DATA.fbCounts[FB_EMP]=(DATA.fbCounts[FB_EMP]||0)+1;
+    document.querySelectorAll(`.fbbtn[data-fb="${FB_EMP}"]`).forEach(b=>{ b.innerHTML=`💬 Feedback<span class="cnt">${DATA.fbCounts[FB_EMP]}</span>`; }); }
+  await loadFeedback(FB_EMP);
+};
+
 $('#foot').innerHTML=`Live from Dynamics 365 via a gated Supabase layer (HR-only). Employee, team and directory data refresh nightly; the Ship Register is loaded monthly. Access is limited to the HR allow-list. Picking accuracy normalizes NVA errors against handling volume. Name mapping notes: register "Suzie" → Elrica Barrett and the single "Kevin" picker → Kevin Blair are unconfirmed; CINDY/MERRYL share order code 675. — Fluidseal HR Portal`;
 boot();
