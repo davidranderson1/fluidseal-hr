@@ -115,6 +115,30 @@
   footer{max-width:1100px;margin:20px auto 40px;padding:0 16px;color:var(--muted);font-size:11px;line-height:1.5;}
   a{color:inherit;}.hidden{display:none!important;}
   .loading{text-align:center;color:var(--muted);padding:40px;font-size:14px;}
+  /* feedback */
+  .fbbtn{margin-top:10px;width:100%;background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-family:inherit;font-weight:800;font-size:12px;color:var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;}
+  .fbbtn:hover{border-color:var(--yellow);background:color-mix(in srgb,var(--yellow) 12%,var(--soft));}
+  .fbbtn .cnt{background:var(--yellow);color:var(--black);border-radius:20px;font-size:10.5px;font-weight:800;padding:1px 7px;}
+  .fbmodal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;z-index:50;}
+  @media(min-width:640px){.fbmodal{align-items:center;padding:16px;}}
+  .fbsheet{background:var(--card);border:1px solid var(--line);border-radius:16px 16px 0 0;width:100%;max-width:560px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;}
+  @media(min-width:640px){.fbsheet{border-radius:16px;}}
+  .fbhead{padding:16px 18px;border-bottom:1px solid var(--line);display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+  .fbhead h2{margin:0;font-size:19px;font-weight:800;}
+  .fbhead .sub{font-size:12px;color:var(--muted);margin-top:3px;}
+  .fbclose{background:none;border:none;color:var(--muted);font-size:24px;cursor:pointer;line-height:1;padding:0 4px;}
+  .fbbody{padding:16px 18px;overflow-y:auto;}
+  .fbform input,.fbform textarea{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--soft);color:var(--ink);font-family:inherit;font-size:13.5px;margin-bottom:10px;}
+  .fbform textarea{min-height:96px;resize:vertical;line-height:1.5;}
+  .fbform .btn{width:100%;padding:11px;}
+  .fbsectlabel{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:800;margin:20px 0 10px;border-top:1px solid var(--line);padding-top:16px;}
+  .fbitem{border-left:3px solid var(--yellow);padding:1px 0 12px 12px;margin-bottom:12px;}
+  .fbitem .m{font-size:11px;color:var(--muted);font-weight:700;display:flex;align-items:center;flex-wrap:wrap;}
+  .fbitem .t{font-size:13.5px;margin-top:3px;white-space:pre-wrap;}
+  .fbitem .st{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;padding:1px 7px;border-radius:10px;margin-left:6px;}
+  .fbitem .st.created{background:color-mix(in srgb,var(--good) 16%,transparent);color:var(--good);}
+  .fbitem .st.failed{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn);}
+  .fbitem .st.pending{background:var(--line);color:var(--muted);}
 </style>
 </head>
 <body>
@@ -155,6 +179,20 @@
 </main>
 <div id="detailview" class="hidden" style="max-width:1100px;margin:0 auto;padding:16px;"></div>
 <footer id="foot" class="hidden"></footer>
+
+<div id="fbmodal" class="fbmodal hidden"><div class="fbsheet">
+  <div class="fbhead"><div><h2 id="fbtitle">Feedback</h2><div class="sub" id="fbsub"></div></div><button class="fbclose" id="fbclose" aria-label="Close">&times;</button></div>
+  <div class="fbbody">
+    <form class="fbform" id="fbform" onsubmit="return false">
+      <input type="text" id="fbtopic" placeholder="Topic (optional) — e.g. Great customer save" maxlength="90">
+      <textarea id="fbtext" placeholder="Write feedback for this employee…"></textarea>
+      <button class="btn" id="fbsubmit">Save feedback</button>
+      <div class="msg" id="fbmsg"></div>
+    </form>
+    <div class="fbsectlabel">Previous feedback</div>
+    <div class="fblist" id="fblist"></div>
+  </div>
+</div></div>
 
 <div id="loading" class="loading hidden">Loading your team…</div>
 
