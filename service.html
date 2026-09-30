@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fluidseal HR — Service Score</title>
+<meta name="description" content="Fluidseal AB HR portal — Service Score. Master view for HR and sales management; My view for each person's own card. Sign-in required.">
+<style>
+  :root{--black:#231F20;--yellow:#FFDD00;--red:#c8222a;--paper:#f4f4f5;--card:#fff;--line:#e4e4e7;--ink:#231F20;--muted:#6b6b70;--soft:#fafafa;--good:#1a7f4b;--warn:#b8860b;--bad:#c8222a;--blue:#2563a8;}
+  :root[data-theme="dark"]{--paper:#161617;--card:#232326;--line:#37373b;--ink:#f4f4f5;--muted:#a1a1aa;--soft:#1c1c1e;--good:#4ade80;--warn:#fbbf24;--bad:#f87171;--blue:#60a5fa;}
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#161617;--card:#232326;--line:#37373b;--ink:#f4f4f5;--muted:#a1a1aa;--soft:#1c1c1e;--good:#4ade80;--warn:#fbbf24;--bad:#f87171;--blue:#60a5fa;}}
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;line-height:1.5;-webkit-font-smoothing:antialiased;}
+  header.top{background:var(--black);border-bottom:4px solid var(--yellow);padding:16px;}
+  .top-wrap{max-width:1100px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+  .wordmark{color:#fff;font-weight:800;letter-spacing:.5px;font-size:20px;}.wordmark b{color:var(--yellow);}
+  .top h1{color:#fff;font-size:13px;font-weight:400;margin:2px 0 0;opacity:.85;}
+  .who{color:#fff;font-size:12px;opacity:.8;}
+  .btn{background:var(--yellow);color:var(--black);border:none;border-radius:8px;padding:8px 14px;font-family:inherit;font-weight:800;font-size:13px;cursor:pointer;}
+  .btn:disabled{opacity:.5;cursor:default;}
+  .btn.ghost{background:transparent;border:1px solid rgba(255,255,255,.4);color:#fff;font-weight:600;}
+  .btn.line{background:transparent;border:1px solid var(--line);color:var(--ink);font-weight:700;}
+  .btn.small{padding:5px 10px;font-size:12px;}
+  main{max-width:1100px;margin:0 auto;padding:16px;}
+  .login{max-width:420px;margin:8vh auto;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:26px;text-align:center;}
+  .login h2{margin:0 0 4px;font-size:20px;}
+  .login p{color:var(--muted);font-size:13px;margin:0 0 18px;}
+  .login input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;background:var(--soft);color:var(--ink);font-family:inherit;font-size:14px;margin-bottom:10px;}
+  .login .btn{width:100%;padding:11px;}
+  .msg{font-size:13px;}.msg.err{color:var(--bad);}.msg.ok{color:var(--good);}
+  .lock{font-size:34px;}
+  a{color:inherit;}.hidden{display:none!important;}
+  .loading{text-align:center;color:var(--muted);padding:40px;font-size:14px;}
+  h3{font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin:0 0 12px;border-bottom:1px solid var(--line);padding-bottom:6px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px;}
+  .fbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px;}
+  .backlink{font-size:12.5px;font-weight:700;color:var(--muted);text-decoration:none;border:1px solid var(--line);border-radius:20px;padding:5px 12px;}
+  .backlink:hover{border-color:var(--yellow);color:var(--ink);}
+  .ftitle{font-size:22px;font-weight:800;}
+  .pill{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;background:color-mix(in srgb,var(--yellow) 22%,transparent);color:var(--warn);border:1px solid var(--warn);padding:3px 9px;border-radius:20px;}
+  .intro{font-size:13px;color:var(--muted);margin:2px 2px 16px;}
+  .banner{background:color-mix(in srgb,var(--yellow) 14%,transparent);border-left:4px solid var(--yellow);border-radius:0 10px 10px 0;padding:10px 14px;font-size:13px;margin-bottom:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
+  .banner b{color:var(--warn);}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px;}
+  .chip{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer;color:var(--ink);font-family:inherit;}
+  .chip.active{background:var(--black);color:#fff;border-color:var(--black);}
+  :root[data-theme="dark"] .chip.active{background:#000;border-color:var(--yellow);}
+  .sep{width:1px;height:22px;background:var(--line);margin:0 4px;}
+  input[type=date],input[type=month],select,.inp{padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--soft);color:var(--ink);font-family:inherit;font-size:13px;}
+  .kpis{display:flex;gap:10px;flex-wrap:wrap;margin:2px 0 16px;}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 14px;flex:1 1 130px;}
+  .kpi .n{font-size:22px;font-weight:800;line-height:1;}.kpi .l{font-size:10.5px;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:.3px;}
+  .kpi .s{font-size:11px;color:var(--muted);margin-top:2px;}
+  .stars{color:var(--yellow);letter-spacing:1px;white-space:nowrap;}
+  .stars .off{color:var(--line);}
+  .stages{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;}
+  .stage{border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--soft);}
+  .stage .sn{font-size:10px;color:var(--muted);font-weight:800;}
+  .stage .st{font-size:12.5px;font-weight:800;margin:2px 0 4px;}
+  .stage .sv{font-size:18px;font-weight:800;}
+  .stage .so{font-size:10.5px;color:var(--muted);}
+  .stage.na .sv{font-size:12px;color:var(--muted);font-weight:700;}
+  .tbl{width:100%;border-collapse:collapse;font-size:13px;}
+  .tbl th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.3px;color:var(--muted);border-bottom:1px solid var(--line);padding:6px 8px;white-space:nowrap;}
+  .tbl td{border-bottom:1px solid var(--line);padding:8px;vertical-align:top;}
+  .tbl tr.click{cursor:pointer;}.tbl tr.click:hover td{background:var(--soft);}
+  .tbl .num{text-align:right;font-variant-numeric:tabular-nums;}
+  .scroll{overflow-x:auto;}
+  .big{font-size:22px;font-weight:800;line-height:1;}
+  .sub{font-size:11.5px;color:var(--muted);}
+  .pct.good{color:var(--good);font-weight:700;}.pct.warn{color:var(--warn);font-weight:700;}.pct.bad{color:var(--bad);font-weight:700;}.pct.na{color:var(--muted);}
+  .miss{border-bottom:1px dashed var(--line);padding:9px 0;display:flex;gap:12px;align-items:flex-start;font-size:13px;}
+  .miss:last-child{border-bottom:none;}
+  .miss .d{flex:0 0 82px;color:var(--muted);font-size:12px;}
+  .miss .b{flex:1;min-width:0;}
+  .miss .w{font-weight:700;}
+  .miss .b,.miss .b a,.tbl td{overflow-wrap:anywhere;}
+  .tag{font-size:9.5px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;padding:2px 8px;border-radius:20px;background:var(--line);color:var(--muted);white-space:nowrap;}
+  .tag.part{background:color-mix(in srgb,var(--warn) 20%,transparent);color:var(--warn);}
+  .tag.zero{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad);}
+  .tag.ok{background:color-mix(in srgb,var(--good) 18%,transparent);color:var(--good);}
+  .tag.ex{background:color-mix(in srgb,var(--blue) 18%,transparent);color:var(--blue);}
+  .whynote{background:color-mix(in srgb,var(--blue) 10%,transparent);border-left:3px solid var(--blue);border-radius:0 6px 6px 0;padding:6px 10px;font-size:12.5px;margin-top:6px;}
+  .rowform{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;}
+  .rowform input,.rowform textarea{flex:1;min-width:180px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--soft);color:var(--ink);font-family:inherit;font-size:13px;}
+  .linkbtn{background:none;border:none;color:var(--blue);font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;padding:0;}
+  .hero{display:flex;gap:18px;align-items:center;flex-wrap:wrap;}
+  .hero .score{font-size:56px;font-weight:900;line-height:1;}
+  .hero .stars{font-size:24px;}
+  .hero .lbl{font-size:16px;font-weight:800;}
+  .comp{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:10px 0;border-bottom:1px dashed var(--line);}
+  .comp:last-child{border-bottom:none;}
+  .bar{grid-column:1/-1;height:8px;border-radius:6px;background:var(--line);overflow:hidden;}
+  .bar i{display:block;height:100%;background:var(--yellow);}
+  .days{display:flex;gap:6px;flex-wrap:wrap;}
+  .dayc{width:52px;border:1px solid var(--line);border-radius:8px;text-align:center;padding:5px 0;background:var(--soft);}
+  .dayc .dd{font-size:10px;color:var(--muted);}.dayc .dn{font-size:16px;font-weight:800;}
+  .dayc.five{background:var(--yellow);color:var(--black);border-color:var(--yellow);}.dayc.five .dd{color:var(--black);}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr;}.hero .score{font-size:44px;}}
+  details.more>summary{cursor:pointer;font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:800;padding:8px 0;list-style:none;}
+  details.more>summary::-webkit-details-marker{display:none;}
+  details.more>summary::before{content:"▸ ";}details.more[open]>summary::before{content:"▾ ";}
+  .empty{color:var(--muted);font-size:13px;font-style:italic;padding:10px 0;}
+  footer{max-width:1100px;margin:20px auto 40px;padding:0 16px;color:var(--muted);font-size:11px;line-height:1.5;}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-wrap">
+    <div><div class="wordmark">FLUIDSEAL<b> AB</b></div><h1>HR Portal &mdash; Service Score</h1></div>
+    <div id="userbox"></div>
+  </div>
+</header>
+
+<div id="loginview">
+  <div class="login">
+    <div class="lock">🔒</div>
+    <h2>Service Score</h2>
+    <p>Internal &middot; sales team, HR and sales management. Sign in with your Fluidseal email and we'll send you a one-time link.</p>
+    <input type="email" id="email" placeholder="you@sealsonline.com" autocomplete="email">
+    <button class="btn" id="sendlink">Email me a sign-in link</button>
+    <div class="msg" id="loginmsg" style="margin-top:12px"></div>
+  </div>
+</div>
+
+<div id="denyview" class="hidden">
+  <div class="login">
+    <div class="lock">⛔</div>
+    <h2 id="denytitle">No access</h2>
+    <p id="denymsg"></p>
+    <div id="denyextra"></div>
+    <button class="btn ghost" id="signout2" style="border-color:var(--line);color:var(--ink);margin-top:10px">Sign out</button>
+  </div>
+</div>
+
+<main id="appview" class="hidden">
+  <div class="fbar">
+    <a class="backlink" href="index.html">&larr; HR Portal</a>
+    <div class="ftitle" id="pagetitle">Service Score</div>
+    <span id="modeflag"></span>
+    <span style="flex:1"></span>
+    <span id="modeswitch"></span>
+  </div>
+  <p class="intro" id="intro"></p>
+  <div id="bannerbox"></div>
+  <div class="controls" id="controls"></div>
+  <div id="content"></div>
+</main>
+
+<div id="loading" class="loading hidden">Loading…</div>
+<footer id="foot" class="hidden"></footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="service.js"></script>
+</body>
+</html>
