@@ -148,6 +148,7 @@ function recompute() {
   for (const m of CAT.filter((x) => x.plan === "computed" && x.formula)) {
     const [op, arg] = m.formula.split(":"); let v = null;
     if (op === "copy") v = num(arg);
+    else if (op === "add") { const vs = arg.split(",").map((k) => num(k.trim())).filter((x) => x != null); v = vs.length ? vs.reduce((a, b) => a + b, 0) : null; }
     else if (op === "sum") { const ks = CAT.filter((x) => x.key.startsWith(arg) && x.plan !== "computed").map((x) => num(x.key)).filter((x) => x != null); v = ks.length ? ks.reduce((a, b) => a + b, 0) : null; }
     else if (op === "pct" || op === "div") { const [a, b] = arg.split(","); const x = num(a), y = num(b); if (x != null && y) v = op === "pct" ? Math.round((10000 * x) / y) / 100 : Math.round((100 * x) / y) / 100; }
     const i = $(`#f_${m.key}`); if (i) i.value = v == null ? "" : String(v);
@@ -238,7 +239,7 @@ async function loadPlan() {
   const steady = CAT.filter((m) => m.plan === "carry" && (byKey[m.key] || []).length >= 5 && new Set(byKey[m.key].map(String)).size === 1);
   const li = (arr) => arr.map((m) => `<li><b>${esc(m.section === "Daily" ? m.label : m.section + " · " + m.label)}</b>${m.code ? " " + esc(m.code) : ""} <span class="sub">${esc(m.source_note || "")}</span></li>`).join("");
   let h = `<div class="card"><h3>1 · Worked out for you — never typed (${CAT.filter((m) => m.plan === "computed").length} lines)</h3><ul>${li(CAT.filter((m) => m.plan === "computed"))}</ul>
-    <p class="sub">Checked against every September day in the email: the page's arithmetic matches all 21 days exactly.</p></div>`;
+    <p class="sub">Checked against every September day in the email: Pick &amp; hold %, Order Takers, Mach. Due Today and Item Per Picker match all 21 days exactly. Production Totals (Machining, Assemblies, Production Total) replace the email's Total Machining and Total Assemblies from 2026-09-30 — the email copied the machining number into Total Assemblies.</p></div>`;
   h += `<div class="card"><h3>2 · Carried from the last day — confirm, change only when it changes (${CAT.filter((m) => m.plan === "carry").length} lines)</h3><ul>${li(CAT.filter((m) => m.plan === "carry"))}</ul>
     ${steady.length ? `<p class="sub">Did not change once in ${esc(ST.month)}: ${steady.map((m) => esc(m.section + " " + m.label)).join(", ")}.</p>` : ""}</div>`;
   h += `<div class="card"><h3>3 · Zero every day in ${esc(ST.month)} — candidates to drop (Cindy and David decide)</h3>${zero.length ? `<ul>${li(zero)}</ul>` : `<div class="empty">None this month.</div>`}</div>`;
