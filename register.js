@@ -64,10 +64,41 @@ function fmtNum(m, v) {
 }
 function sections() { const out = []; for (const m of CAT) { let s = out.find((x) => x.name === m.section); if (!s) { s = { name: m.section, items: [] }; out.push(s); } s.items.push(m); } return out; }
 function planBadge(m) {
-  if (m.plan === "computed") return `<span class="badge computed">worked out</span>`;
+  if (m.plan === "computed") return `<span class="badge computed">= calculated</span>`;
   if (m.plan === "carry") return `<span class="badge carry">carried</span>`;
+  if (m.feed) return `<span class="badge soon">report coming</span>`;
   if (m.plan === "auto") return `<span class="badge auto">Dynamics check</span>`;
   return "";
+}
+// Field types (David 2026-09-30): Typed · Carried · From a report (locked) · Calculated (locked). A Master can override a report number.
+function fieldType(m, v) {
+  if (m.plan === "computed") return "calc";
+  const src = String((v && v.source) || "");
+  if (src.startsWith("p21:")) return "report";
+  if (src === "override") return "override";
+  return m.plan === "carry" ? "carry" : "typed";
+}
+function formulaText(m) {
+  const n = String(m.source_note || "");
+  const i = n.indexOf("Worked out:");
+  if (i >= 0) return n.slice(i + 11).trim();
+  const lab = (k) => { const x = CAT.find((c) => c.key === k); return x ? (["Daily", "Picking", "Order Takers"].includes(x.section) ? x.label : `${x.section} ${x.label}`) : k; };
+  const [op, arg] = String(m.formula || "").split(":");
+  if (op === "copy") return `same as ${lab(arg)}`;
+  if (op === "add") return arg.split(",").map((k) => lab(k.trim())).join(" + ");
+  if (op === "sum") return "the sum of the lines below";
+  if (op === "pct" || op === "div") { const [a, b] = arg.split(","); return `${lab(a)} ÷ ${lab(b)}`; }
+  return m.formula || "";
+}
+function whenMt(iso) { try { return new Date(iso).toLocaleString("en-CA", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "America/Edmonton" }).replace(",", ""); } catch (e) { return ""; } }
+function legendHtml() {
+  return `<div class="legend">
+    <span><i class="sw t-typed">12</i><b>Typed</b> — you enter it</span>
+    <span><i class="sw t-carry">12</i><b>Carried</b> — starts from the last day; change it only when it changes</span>
+    <span><i class="sw t-report">🔒 12</i><b>From a report</b> — locked; fills itself when the P21 report arrives${WHO && WHO.master ? " (Masters can override)" : ""}</span>
+    <span><i class="sw t-calc">= 12</i><b>Calculated</b> — locked; worked out from other lines</span>
+    <span><span class="badge soon">report coming</span> typed until its report is set up — then it locks</span>
+  </div>`;
 }
 
 // ---------- shell ----------
@@ -75,7 +106,7 @@ function renderShell() {
   $("#pagetitle").textContent = "Ship Register";
   $("#modeflag").innerHTML = `<span class="pill">${WHO.master ? "Master" : "Entry"}</span>`;
   $("#modeswitch").innerHTML = (WHO.master || WHO.person ? `<a class="backlink" href="service.html">Service Score</a>` : "");
-  $("#intro").innerHTML = `The digital copy of the nightly Ship Register email. Enter the day's numbers once — lines marked <span class="badge computed">worked out</span> fill themselves, <span class="badge carry">carried</span> lines start from the last day, and <span class="badge auto">Dynamics check</span> shows what Dynamics saw. September is loaded from Cindy's email of 09/29.`;
+  $("#intro").innerHTML = `The digital copy of the nightly Ship Register email. Every line is one of four kinds: <b>typed</b>, <b>carried</b> from the last day, <b>from a report</b> (locked) or <b>calculated</b> (locked). <span class="badge auto">Dynamics check</span> shows what Dynamics saw. September is loaded from Cindy's email of 09/29.`;
   $("#bannerbox").innerHTML = "";
   $("#controls").innerHTML = [["entry", "Tonight's entry"], ["month", "Month (email layout)"], ["plan", "What you can stop typing"]].map(([k, l]) => `<button class="chip" data-tab="${k}">${l}</button>`).join("");
   $("#controls").querySelectorAll("[data-tab]").forEach((c) => (c.onclick = () => go(c.dataset.tab)));
@@ -104,7 +135,7 @@ async function loadEntry() {
     </div>${DAY.note ? `<div class="sub" style="margin-top:6px">Note: ${esc(DAY.note)}</div>` : ""}
     ${closed ? `<div class="banner" style="margin:10px 0 0"><b>CLOSED</b> — this day shows CLOSED in the register.${WHO.master ? " Reopen it below to enter numbers." : ""}</div>` : ""}
     ${!DAY.can_edit ? `<div class="banner" style="margin:10px 0 0">Days older than a week can only be changed by a Master user.</div>` : ""}
-    <ul class="checks" id="checks"></ul></div>`;
+    <ul class="checks" id="checks"></ul>${legendHtml()}</div>`;
   h += `<div class="entry">`;
   for (const s of sections()) {
     h += `<div class="card"><h3>${esc(s.name)}</h3>`;
@@ -112,15 +143,20 @@ async function loadEntry() {
       const v = DAY.values[m.key], carry = DAY.carry[m.key], sugg = (DAY.suggest[m.key] || [])[0], pv = PREV && PREV.values[m.key];
       let val = v ? (m.kind === "text" ? v.txt : v.num) : null, carried = false;
       if (val == null && m.plan === "carry" && carry && !closed) { val = m.kind === "text" ? carry.txt : carry.num; carried = true; }
+      const t = fieldType(m, v), rl = t === "report" || (t === "override" && !WHO.master);
       const hints = [];
-      if (m.plan === "computed") hints.push(`<span class="badge computed">worked out</span>`);
+      if (t === "calc") hints.push(`<span class="badge computed">= calculated</span><span>${esc(formulaText(m))}</span>`);
+      if (t === "report") hints.push(`<span class="badge report">🔒 from report</span><span>${esc(String(v.source).slice(4))}${v.at ? " · " + esc(whenMt(v.at)) : ""}</span>${WHO.master && !locked ? `<button class="linkbtn" data-ovr="${m.key}">override</button>` : ""}`);
+      if (t === "override") hints.push(`<span class="badge override">${WHO.master ? "overridden" : "🔒 overridden"}</span><span>report number changed by ${esc(v.by || "a Master")}</span>`);
       if (carried) hints.push(`<span class="badge carry">carried from ${esc(mmdd(carry.day))}</span>`);
       else if (m.plan === "carry") hints.push(`<span class="badge carry">carried line</span>`);
-      if (sugg) hints.push(`<span class="badge auto">Dynamics: ${esc(fmtNum(m, sugg.num))}</span>${m.plan !== "computed" && !locked ? ` <button class="linkbtn" data-use="${m.key}" data-val="${esc(sugg.num)}">use it</button>` : ""}`);
+      if (m.feed && t !== "report" && t !== "override") hints.push(`<span class="badge soon" title="${esc(m.feed)}">report coming</span>`);
+      if (sugg) hints.push(`<span class="badge auto">Dynamics: ${esc(fmtNum(m, sugg.num))}</span>${t !== "calc" && !rl && !locked ? ` <button class="linkbtn" data-use="${m.key}" data-val="${esc(sugg.num)}">use it</button>` : ""}`);
       if (pv) hints.push(`<span>last day: ${esc(fmtNum(m, m.kind === "text" ? pv.txt : pv.num))}</span>`);
       if (v && String(v.source || "").startsWith("import")) hints.push(`<span>from the email</span>`);
+      const cls = t === "calc" ? "t-calc" : t === "report" ? "t-report" : t === "override" ? "t-override" + (rl ? " t-locked" : "") : (m.plan === "carry" ? "t-carry" : "t-typed");
       h += `<div class="erow" title="${esc(m.source_note || "")}"><label for="f_${m.key}">${esc(m.label)}${m.code ? `<span class="code">${esc(m.code)}</span>` : ""}</label>
-        <input id="f_${m.key}" data-key="${m.key}" data-kind="${m.kind}" ${m.plan === "computed" || locked ? "readonly" : ""} ${m.kind === "text" ? "" : 'inputmode="decimal"'} value="${esc(val == null ? "" : fmtNum(m, val).replace("%", ""))}" data-orig="${esc(val == null ? "" : String(val))}" data-carried="${carried ? 1 : 0}">
+        <input id="f_${m.key}" class="${cls}" data-key="${m.key}" data-kind="${m.kind}" data-lock="${rl ? 1 : 0}" ${t === "calc" || rl || locked ? "readonly" : ""} ${m.kind === "text" ? "" : 'inputmode="decimal"'} value="${esc(val == null ? "" : fmtNum(m, val).replace("%", ""))}" data-orig="${esc(val == null ? "" : String(val))}" data-carried="${carried ? 1 : 0}">
         ${hints.length ? `<div class="hint">${hints.join(" · ")}</div>` : ""}</div>`;
     }
     h += `</div>`;
@@ -137,6 +173,7 @@ async function loadEntry() {
   $("#dpick").onchange = (e) => { if (e.target.value) { ST.day = e.target.value; loadEntry(); } };
   document.querySelectorAll("#content input[data-key]").forEach((i) => i.addEventListener("input", () => { i.classList.toggle("changed", i.value !== i.dataset.orig); recompute(); }));
   document.querySelectorAll("[data-use]").forEach((b) => (b.onclick = () => { const i = $(`#f_${b.dataset.use}`); i.value = b.dataset.val; i.classList.add("changed"); recompute(); }));
+  document.querySelectorAll("[data-ovr]").forEach((b) => (b.onclick = () => { const i = $(`#f_${b.dataset.ovr}`); i.readOnly = false; i.dataset.lock = "0"; i.classList.remove("t-report"); i.classList.add("t-override"); b.replaceWith(Object.assign(document.createElement("span"), { textContent: "unlocked — your number will be marked overridden" })); i.focus(); i.select(); }));
   if ($("#savedraft")) $("#savedraft").onclick = () => save(false);
   if ($("#submitday")) $("#submitday").onclick = () => save(true);
   if ($("#markclosed")) $("#markclosed").onclick = () => setStatus("closed");
@@ -165,7 +202,7 @@ function recompute() {
 async function save(submit) {
   const msg = $("#savemsg"); msg.className = "msg"; msg.textContent = "Saving…";
   const vals = {};
-  document.querySelectorAll("#content input[data-key]").forEach((i) => { const m = CAT.find((x) => x.key === i.dataset.key); if (m && m.plan !== "computed") vals[m.key] = i.value.trim() === "" ? null : i.value.trim(); });
+  document.querySelectorAll("#content input[data-key]").forEach((i) => { const m = CAT.find((x) => x.key === i.dataset.key); if (m && m.plan !== "computed" && i.dataset.lock !== "1") vals[m.key] = i.value.trim() === "" ? null : i.value.trim(); });
   try {
     await rpc("svc_sr_save", { p_day: ST.day, p_values: vals, p_submit: submit, p_note: $("#dnote").value.trim() || null });
     msg.className = "msg ok"; msg.textContent = submit ? "Submitted ✓" : "Saved ✓";
@@ -188,7 +225,7 @@ async function loadMonth() {
   let h = `<div class="card"><div class="controls" style="margin-bottom:10px"><input type="month" id="mpick" value="${ST.month}">
     <button class="btn small" id="copyout">Copy table for Outlook</button><button class="btn small line" id="csv">Download CSV</button><span class="msg" id="mmsg"></span></div>
     <div class="scroll"><table class="srgrid" id="srgrid">${gridHtml(cols, V, S, false)}</table></div>
-    <p class="sub" style="margin-top:8px">Same rows and weekly blocks as the Ship Register email. Shaded = typed on this page; <i>italic</i> = worked out; plain = imported from the email. Click a date to open that day.</p></div>`;
+    <p class="sub" style="margin-top:8px">Same rows and weekly blocks as the Ship Register email. Key: <span class="key man">typed on this page</span> · <span class="key rep">from a report</span> · <span class="key ovr">report overridden</span> · <i>italic</i> = calculated · plain = imported from the email. Click a date to open that day.</p></div>`;
   $("#content").innerHTML = h;
   $("#mpick").onchange = (e) => { if (e.target.value) { ST.month = e.target.value; loadMonth(); } };
   document.querySelectorAll("#srgrid th[data-day]").forEach((t) => (t.onclick = () => { ST.day = t.dataset.day; go("entry"); }));
@@ -214,7 +251,7 @@ function gridHtml(cols, V, S, plain) {
     for (const d of cols) {
       const st = S[d];
       if (st && st.status === "closed") h += `<td class="closed">CLOSED</td>`;
-      else { const c = (V[d] || {})[m.key]; const v = c ? (m.kind === "text" ? c.t : c.n) : null; const cls = !c || plain ? "" : c.src === "computed" ? "comp" : c.src === "manual" ? "man" : ""; h += `<td class="${cls}">${esc(fmtNum(m, v))}</td>`; }
+      else { const c = (V[d] || {})[m.key]; const v = c ? (m.kind === "text" ? c.t : c.n) : null; const src = c ? String(c.src || "") : ""; const cls = !c || plain ? "" : src === "computed" ? "comp" : src.startsWith("p21:") ? "rep" : src === "override" ? "ovr" : src === "manual" ? "man" : ""; h += `<td class="${cls}">${esc(fmtNum(m, v))}</td>`; }
       if (isFri(d)) h += `<td class="gap"></td>`;
     }
     h += `</tr>`;
@@ -238,12 +275,12 @@ async function loadPlan() {
   const zero = CAT.filter((m) => m.plan !== "computed" && (byKey[m.key] || []).length >= 5 && byKey[m.key].every((v) => Number(v) === 0));
   const steady = CAT.filter((m) => m.plan === "carry" && (byKey[m.key] || []).length >= 5 && new Set(byKey[m.key].map(String)).size === 1);
   const li = (arr) => arr.map((m) => `<li><b>${esc(m.section === "Daily" ? m.label : m.section + " · " + m.label)}</b>${m.code ? " " + esc(m.code) : ""} <span class="sub">${esc(m.source_note || "")}</span></li>`).join("");
-  let h = `<div class="card"><h3>1 · Worked out for you — never typed (${CAT.filter((m) => m.plan === "computed").length} lines)</h3><ul>${li(CAT.filter((m) => m.plan === "computed"))}</ul>
+  let h = `<div class="card"><h3>1 · Calculated — locked, never typed (${CAT.filter((m) => m.plan === "computed").length} lines)</h3><ul>${li(CAT.filter((m) => m.plan === "computed"))}</ul>
     <p class="sub">Checked against every September day in the email: Pick &amp; hold %, Order Takers, Mach. Due Today and Item Per Picker match all 21 days exactly. Production Totals (Machining, Assemblies, Production Total) replace the email's Total Machining and Total Assemblies from 2026-09-30 — the email copied the machining number into Total Assemblies.</p></div>`;
   h += `<div class="card"><h3>2 · Carried from the last day — confirm, change only when it changes (${CAT.filter((m) => m.plan === "carry").length} lines)</h3><ul>${li(CAT.filter((m) => m.plan === "carry"))}</ul>
     ${steady.length ? `<p class="sub">Did not change once in ${esc(ST.month)}: ${steady.map((m) => esc(m.section + " " + m.label)).join(", ")}.</p>` : ""}</div>`;
   h += `<div class="card"><h3>3 · Zero every day in ${esc(ST.month)} — candidates to drop (Cindy and David decide)</h3>${zero.length ? `<ul>${li(zero)}</ul>` : `<div class="empty">None this month.</div>`}</div>`;
-  h += `<div class="card"><h3>4 · Could come from a report instead of typing</h3><table class="tbl"><thead><tr><th>Lines</th><th>Where the number comes from</th><th>What we need</th></tr></thead><tbody>
+  h += `<div class="card"><h3>4 · From a report — typed until the report is set up, then locked (${CAT.filter((m) => m.feed).length} lines marked <span class="badge soon">report coming</span>)</h3><table class="tbl"><thead><tr><th>Lines</th><th>Where the number comes from</th><th>What we need</th></tr></thead><tbody>
     <tr><td>The taker lines (Marion 650 … David 771), EDMONTON ORDERS, CALGARY ORDERS</td><td>A P21 report by taker. They are not new orders (the order register gives 82 Edmonton / 40 Calgary for 09/29, the sheet 99 / 52) and not Dynamics shipments (Dynamics Shipped stage for 09/29 gives 136, the sheet 151)</td><td>Cindy names the P21 report; it gets sent nightly to the intake mailbox like the order registers — then these 11 lines fill themselves</td></tr>
     <tr><td>Total Orders, Total Pick &amp; Holds, Total Items</td><td>P21 (pick tickets / lines for the day)</td><td>The same: name the report, send it nightly</td></tr>
     <tr><td>Overdue Orders, Orders Over $250, Cannot Locate</td><td>P21 open-order and cannot-locate lists</td><td>One report each, or drop the lines that stay at 0</td></tr>
