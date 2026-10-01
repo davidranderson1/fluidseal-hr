@@ -19,7 +19,7 @@ async function boot() {
   WHO = data;
   if (!WHO.entry) { deny("No access", `Signed in as <b>${esc(WHO.email)}</b>. The Ship Register is open to the people Cindy adds for the nightly entry, HR and sales management.`); return; }
   try { CAT = await rpc("svc_sr_catalog"); } catch (e) { deny("Could not load", esc(e.message)); return; }
-  ST.day = lastEntryDay(WHO.today);
+  ST.day = defaultEntryDay(WHO.today);
   ST.month = String(ST.day).slice(0, 7);
   show("app");
   renderShell();
@@ -51,6 +51,11 @@ async function rpc(name, args) { const { data, error } = await sb.rpc(name, args
 function addDays(iso, n) { const d = new Date(iso + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
 function isWeekend(iso) { return [0, 6].includes(new Date(iso + "T12:00:00Z").getUTCDay()); }
 function lastEntryDay(today) { let d = today; while (isWeekend(d)) d = addDays(d, -1); return d; }
+// The register is entered for a finished day (Cindy's first entry, Thu 10/01 8:52 AM, carried Wednesday's numbers):
+// before 3 PM Mountain the page opens on the previous working day; from 3 PM on, on today.
+function hourMt() { try { return Number(new Date().toLocaleString("en-CA", { timeZone: "America/Edmonton", hour: "numeric", hour12: false })) % 24; } catch (e) { return 12; } }
+function dayNotOver(day) { return WHO && day === WHO.today && !isWeekend(day) && hourMt() < 15; }
+function defaultEntryDay(today) { return isWeekend(today) ? lastEntryDay(today) : (hourMt() < 15 ? stepDay(today, -1) : today); }
 function stepDay(iso, dir) { let d = addDays(iso, dir); while (isWeekend(d)) d = addDays(d, dir); return d; }
 function fmtDay(iso) { return new Date(iso + "T12:00:00Z").toLocaleDateString("en-CA", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" }); }
 function mmddyy(iso) { const [y, m, d] = iso.split("-"); return `${m}/${d}/${y.slice(2)}`; }
@@ -129,10 +134,11 @@ async function loadEntry() {
   const locked = !DAY.can_edit || (closed && !WHO.master);
   let h = `<div class="card"><div class="controls" style="margin:0">
       <button class="chip" id="dprev">◀</button><input type="date" id="dpick" value="${ST.day}" max="${WHO.today}"><button class="chip" id="dnext" ${ST.day >= WHO.today ? "disabled" : ""}>▶</button>
-      <b style="font-size:15px;margin-left:6px">${esc(fmtDay(ST.day))}</b>
+      <b style="font-size:15px;margin-left:6px"><span class="sub" style="font-size:12px;font-weight:700">Numbers for</span> ${esc(fmtDay(ST.day))}</b>
       <span class="status ${esc(DAY.status)}">${DAY.status === "new" ? "not started" : esc(DAY.status)}</span>
       ${DAY.submitted_by ? `<span class="sub">submitted by ${esc(DAY.submitted_by)}</span>` : DAY.updated_by ? `<span class="sub">last saved by ${esc(DAY.updated_by)}</span>` : ""}
     </div>${DAY.note ? `<div class="sub" style="margin-top:6px">Note: ${esc(DAY.note)}</div>` : ""}
+    ${dayNotOver(ST.day) && !closed ? `<div class="banner" style="margin:10px 0 0"><b>Today isn't over yet.</b> The register is entered for a finished day — are these ${esc(fmtDay(stepDay(ST.day, -1)).split(",")[0])}'s numbers? <button class="btn small" id="goprev">Open ${esc(mmdd(stepDay(ST.day, -1)))}</button></div>` : ""}
     ${closed ? `<div class="banner" style="margin:10px 0 0"><b>CLOSED</b> — this day shows CLOSED in the register.${WHO.master ? " Reopen it below to enter numbers." : ""}</div>` : ""}
     ${!DAY.can_edit ? `<div class="banner" style="margin:10px 0 0">Days older than a week can only be changed by a Master user.</div>` : ""}
     <ul class="checks" id="checks"></ul>${legendHtml()}</div>`;
@@ -169,6 +175,7 @@ async function loadEntry() {
     <span class="msg" id="savemsg"></span></div>`;
   $("#content").innerHTML = h;
   $("#dprev").onclick = () => { ST.day = stepDay(ST.day, -1); loadEntry(); };
+  if ($("#goprev")) $("#goprev").onclick = () => { ST.day = stepDay(ST.day, -1); loadEntry(); };
   $("#dnext").onclick = () => { const n = stepDay(ST.day, 1); if (n <= WHO.today) { ST.day = n; loadEntry(); } };
   $("#dpick").onchange = (e) => { if (e.target.value) { ST.day = e.target.value; loadEntry(); } };
   document.querySelectorAll("#content input[data-key]").forEach((i) => i.addEventListener("input", () => { i.classList.toggle("changed", i.value !== i.dataset.orig); recompute(); }));
