@@ -45,18 +45,26 @@ sb.auth.onAuthStateChange((ev)=>{ if(ev==='SIGNED_IN'){ history.replaceState(nul
 // ---------- data ----------
 const DEVICE_TITLE = 'Device - Machine';
 function isHuman(e){ return e.title!==DEVICE_TITLE && (e.first_name||'')!=='Sales'; }
+// date-only values ("2025-10-06") are calendar dates: parse them as local dates, never as UTC midnight
+// (UTC parsing showed Oct 5 for an Oct 6 start in Mountain time)
+function parseD(s){ if(!s) return null; const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s)); return m? new Date(+m[1],+m[2]-1,+m[3]) : new Date(s); }
+function isoToday(){ const n=new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`; }
+function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+let REV_IDX={};
+function reviewDue(r){ if(!r||!r.review_date) return false; const days=(parseD(r.review_date)-parseD(isoToday()))/86400000; return days<=30 && days>=-60; }
 function tenure(startISO){
   if(!startISO) return '—';
-  const d=new Date(startISO), n=new Date();
+  const d=parseD(startISO), n=new Date();
   let m=(n.getFullYear()-d.getFullYear())*12+(n.getMonth()-d.getMonth());
   if(n.getDate()<d.getDate()) m--;
   const y=Math.floor(m/12), mm=m%12; return (y?`${y}y `:'')+`${mm}m`;
 }
 async function loadAndRender(){
   show('loading');
-  const [emp, periods, teamMembers, counts] = await Promise.all([
-    sb.rpc('hr_employee_list'), sb.rpc('hr_register_periods'), sb.rpc('hr_team_member_list'), sb.rpc('hr_feedback_counts')
+  const [emp, periods, teamMembers, counts, revIdx] = await Promise.all([
+    sb.rpc('hr_employee_list'), sb.rpc('hr_register_periods'), sb.rpc('hr_team_member_list'), sb.rpc('hr_feedback_counts'), sb.rpc('hr_review_index')
   ]);
+  REV_IDX={}; (revIdx.data||[]).forEach(r=>{ if(r.employee_id) REV_IDX[r.employee_id]=r; });
   const fbCounts={}; (counts.data||[]).forEach(r=>{ if(r.employee_id) fbCounts[r.employee_id]=Number(r.n); });
   const employees = emp.data||[];
   const period = (periods.data||[])[0];
@@ -81,7 +89,9 @@ async function loadAndRender(){
       start: e.employee_start_date, end: e.employee_end_date,
       tenure: tenure(e.employee_start_date), p21: e.p21_user_role, email: e.work_email,
       status: e.status, reason: e.status_reason,
-      review: !!REVIEWS[e.last_name.replace(/\s+/g,'')] && e.status==='Active',
+      review: reviewDue(REV_IDX[e.employee_id]) && e.status==='Active',
+      reviewDate: (REV_IDX[e.employee_id]||{}).review_date||null, reviewKind: (REV_IDX[e.employee_id]||{}).review_kind||null,
+      hasProfile: !!REV_IDX[e.employee_id],
       reg: r ? { type:r.role_type, total:Number(r.total), avg:Number(r.avg_active), active:r.active_days, worked:r.worked_days, series:r.series, note:r.note } : null,
     };
   };
@@ -106,9 +116,10 @@ function fmtReg(r){
   const label=r.type==='pick'?'picks':'orders', col=r.type==='pick'?'var(--blue)':'var(--good)';
   return `<div class="regbar"><div><div class="regbig">${r.total}<small> ${label}</small></div><div class="regsub">${r.avg}/day · ${r.active}/${r.worked} days</div></div>${spark(r.series,col)}</div>`;
 }
-function fmtDate(d){ return d? new Date(d).toLocaleDateString('en-CA',{year:'numeric',month:'short',day:'numeric'}) : '—'; }
+function fmtDate(d){ const x=parseD(d); return x? x.toLocaleDateString('en-CA',{year:'numeric',month:'short',day:'numeric'}) : '—'; }
+function fmtShort(d){ const x=parseD(d); return x? x.toLocaleDateString('en-CA',{month:'short',day:'numeric'}) : ''; }
 function card(e,gone){
-  const badge = gone?`<span class="goneflag">${e.reason||'departed'}</span>`:(e.review?'<span class="duebadge">review due</span>':'');
+  const badge = gone?`<span class="goneflag">${e.reason||'departed'}</span>`:(e.review?`<span class="duebadge">review ${fmtShort(e.reviewDate)}</span>`:'');
   const meta = gone? `${e.title} · left ${fmtDate(e.end)}` : `${e.title} · ${e.tenure} tenure`;
   const fbn=(DATA&&DATA.fbCounts&&DATA.fbCounts[e.id])||0;
   const fbbtn=`<button class="fbbtn" data-fb="${e.id}" data-nm="${e.first} ${e.last}">💬 Feedback${fbn?`<span class="cnt">${fbn}</span>`:''}</button>`;
@@ -126,9 +137,10 @@ function renderRoster(){
     ['n',(p.items||0).toLocaleString(),'Items picked'],
     ['n',p.items_per_picker||'—','Items / picker / day'],
     ['n',p.cannot_locate_per_day||'—','Cannot-locate / day'],
-    ['n',DATA.active.filter(e=>e.review).length,'Reviews due']
+    ['n',DATA.active.filter(e=>e.review).length,'Reviews due (next 30 days)']
   ].map(k=>`<div class="kpi"><div class="n">${k[1]}</div><div class="l">${k[2]}</div></div>`).join('');
-  $('#infoline').innerHTML=`Every active employee, grouped by department, live from Dynamics 365. Productivity from the ${p.label||''} Ship Register. Click anyone for their profile; the review-due employees carry the full deep-dive.`;
+  const nProf=DATA.active.filter(e=>e.hasProfile).length;
+  $('#infoline').innerHTML=`Every active employee, grouped by department, live from Dynamics 365. Productivity from the ${p.label||''} Ship Register. Click anyone for their review profile (${nProf} of ${DATA.active.length} prepared — attendance, error log, recognitions, HR timeline and a draft assessment).`;
 
   const depts=[...new Set(DATA.active.map(e=>e.dept))].sort();
   $('#controls').innerHTML=['All',...depts].map(d=>`<button class="chip ${d===curDept?'active':''}" data-d="${d}">${d}${d==='All'?' ('+DATA.active.length+')':''}</button>`).join('')
@@ -157,54 +169,98 @@ function renderRoster(){
 }
 function metric(n,l,cls){return `<div class="metric"><div class="n ${cls||''}">${n}</div><div class="l">${l}</div></div>`;}
 function timeline(items){return `<div class="timeline">`+items.map(it=>`<div class="tl-item"><div class="tl-dot ${it.kind}"></div><div class="tl-date">${it.date}</div><div class="tl-title">${it.title}${it.dept?`<span class="tl-dept">${it.dept}</span>`:''}</div><div class="tl-desc">${it.desc}</div></div>`).join('')+`</div>`;}
-function training(list){const ic={done:'✓',prog:'◐',plan:'○'};return list.map(t=>`<div class="trainrow"><div class="ti ${t.s}">${ic[t.s]}</div><div class="tt"><b>${t.t}</b>${t.assess?'<span class="assessbadge">assessment done</span>':''}<span class="dt">${t.dt}</span><small>${t.d}</small></div></div>`).join('')+`<p class="notenote">No employee test/quiz scores exist in any system — training is on-the-job milestones and signed review forms.</p>`;}
+function training(list){const ic={done:'✓',prog:'◐',plan:'○'};if(!list||!list.length) return `<div class="empty">No training notepads or review forms recorded in Dynamics for this period.</div>`;return list.map(t=>`<div class="trainrow"><div class="ti ${t.s}">${ic[t.s]||'○'}</div><div class="tt"><b>${t.t}</b>${t.assess?'<span class="assessbadge">assessment done</span>':''}<span class="dt">${t.dt||''}</span><small>${t.d||''}</small></div></div>`).join('')+`<p class="notenote">No employee test/quiz scores exist in any system — training is on-the-job milestones and signed review forms.</p>`;}
 function nvaBlock(n){
-  if(n.acc===null) return `<div class="rating"><span class="score na">${n.grade}</span></div><p style="font-size:13px;color:var(--muted);margin-top:10px;">Non-picking role — no picking volume to score.</p>`;
-  const rows=n.rows.length?`<table><thead><tr><th>Date</th><th>Type</th><th>Detail</th></tr></thead><tbody>`+n.rows.map(r=>`<tr><td class="date">${r.date}</td><td>${r.type} ${r.cust?'<span class="pill cust">reached customer</span>':''}</td><td>${r.txt}</td></tr>`).join('')+`</tbody></table>`:`<div class="empty">No NVAs as responsible.</div>`;
+  const rows=(n.rows||[]).length?`<table><thead><tr><th>Date</th><th>Type</th><th>Detail</th></tr></thead><tbody>`+n.rows.map(r=>`<tr><td class="date">${r.date}</td><td>${r.type} ${r.cust?'<span class="pill cust">reached customer</span>':''}</td><td>${r.txt}</td></tr>`).join('')+`</tbody></table>`:`<div class="empty">No NVAs of their own in this period.</div>`;
+  const note=n.note?`<p class="notenote">${n.note}</p>`:'';
+  if(n.acc===null||n.acc===undefined){
+    if(!n.total && !n.errors && !n.caught && !(n.rows||[]).length) return `<div class="rating"><span class="score na">${n.grade||'No NVAs'}</span></div><p style="font-size:13px;color:var(--muted);margin-top:10px;">No NVAs as responsible and none caught in this period.</p>${note}`;
+    return `<div class="rating"><span class="score ${n.gcol==='warn'?'warn':'na'}">${n.grade||'Error log'}</span></div>
+      <div class="metric-row" style="margin-top:12px;">${metric(n.total!=null?n.total:n.errors,'NVAs naming them','')}${metric(n.errors,'Own process / picking / entry',n.errors>3?'bad':(n.errors>0?'warn':'good'))}${metric(n.cust,'Reached customer',n.cust>0?'bad':'good')}${metric(n.caught,'Discrepancies caught','good')}</div>
+      <h3 style="margin-top:18px;">Their own errors (most recent)</h3>${rows}${note}`;
+  }
   const col=n.gcol==='good'?'good':(n.gcol==='warn'?'warn':'muted');
   return `<div class="gauge-wrap"><div class="gauge" style="--pct:${n.acc};--col:var(--${col})"><div><span>${n.acc}%</span><small>clean</small></div></div>
     <div class="gauge-txt"><div class="grade" style="color:var(--${n.gcol==='good'?'good':'warn'})">${n.grade}</div>
     <p style="margin:6px 0 0;color:var(--muted)"><b style="color:var(--ink)">${n.errors}</b> errors across <b style="color:var(--ink)">~${n.activity}</b> handling events = <b style="color:var(--ink)">${n.rate}%</b> error rate, <b style="color:var(--ink)">${n.custRate}%</b> customer-facing.</p></div></div>
     <div class="metric-row" style="margin-top:14px;">${metric(n.errors,'NVAs caused',n.errors>3?'bad':(n.errors>0?'warn':'good'))}${metric(n.cust,'Reached customer',n.cust>0?'bad':'good')}${metric(n.caught,'Discrepancies caught','good')}${metric(n.rate+'%','Error / handling',n.rate>25?'bad':(n.rate>12?'warn':'good'))}</div>
-    <h3 style="margin-top:18px;">The errors</h3>${rows}`;
+    <h3 style="margin-top:18px;">The errors</h3>${rows}${note}`;
 }
-function vaBlock(list){return list.length?`<table><thead><tr><th>Date</th><th>Recognition</th></tr></thead><tbody>`+list.map(v=>`<tr><td class="date">${v.date}</td><td>${v.txt}</td></tr>`).join('')+`</tbody></table>`:`<div class="empty">No VA recognitions on record.</div>`;}
-function notesBlock(list){return list.map(n=>`<div class="note"><div class="nd">${n.d.replace(/·\s*(\w+)$/,'· <span class="who2">$1</span>')}</div><div class="nx">${n.x}</div></div>`).join('');}
+function vaBlock(list,given){const g=given?`<p class="notenote">Gave ${given} VA${given>1?'s':''} to colleagues in this period.</p>`:'';return (list&&list.length?`<table><thead><tr><th>Date</th><th>Recognition</th></tr></thead><tbody>`+list.map(v=>`<tr><td class="date">${v.date}</td><td>${v.txt}</td></tr>`).join('')+`</tbody></table>`:`<div class="empty">No VA recognitions on record.</div>`)+g;}
+function notesBlock(list){if(!list||!list.length) return `<div class="empty">No review-relevant HR notes in this period.</div>`;return list.map(n=>`<div class="note"><div class="nd">${n.d.replace(/·\s*(\w+)$/,'· <span class="who2">$1</span>')}</div><div class="nx">${n.x}</div></div>`).join('');}
 function dailyTable(r){
   if(!r||!r.series) return '';
-  const labs=DATA.period&&DATA.period.period? null:null;
   let cells=''; r.series.forEach((v)=>{cells+=`<td class="date" style="text-align:center"><b style="color:var(--ink);font-size:14px">${v==null?'—':v}</b></td>`;});
   return `<div style="overflow-x:auto"><table><tbody><tr>${cells}</tr></tbody></table></div>`;
 }
-function openDetail(id){
+// v2 profiles hold raw text from Dynamics (NVA, VA, notes): escape every string before it reaches the page
+function escDeep(o){ if(typeof o==='string') return esc(o); if(Array.isArray(o)) return o.map(escDeep); if(o&&typeof o==='object'){ const r={}; for(const k in o) r[k]=escDeep(o[k]); return r; } return o; }
+function attBlock(a){
+  const rows=(a.rows||[]).length?`<details style="margin-top:10px"><summary style="cursor:pointer;font-size:12.5px;color:var(--muted)">Show the ${a.rows.length} entries</summary><table style="margin-top:6px"><thead><tr><th>Date</th><th>Type</th><th>Detail</th></tr></thead><tbody>`+a.rows.map(r=>`<tr><td class="date">${r.date}</td><td>${r.type}</td><td>${r.detail||''}</td></tr>`).join('')+`</tbody></table></details>`:'';
+  const extra=(a.leave!=null)?metric(a.leave,'Left early',a.leave>3?'warn':''):'';
+  return `<div class="rating"><span class="score ${a.rating}">${a.label}</span></div><div class="metric-row">${metric(a.late,'Late',a.late>3?'bad':(a.late>0?'warn':'good'))}${metric(a.absent,'Absences',a.absent>0?'warn':'good')}${extra}${metric(a.appt,'Planned','')}</div><p style="font-size:12.5px;color:var(--muted);margin-top:12px;">${a.note||''}</p>${rows}`;
+}
+function kpiBlock(k){
+  if(!k) return '';
+  const tbl=k.table?`<div style="overflow-x:auto;margin-top:10px"><table><thead><tr>${k.table.head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${k.table.rows.map(r=>`<tr>${r.map((c,i)=>i?`<td style="text-align:center"><b>${c}</b></td>`:`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`:'';
+  return `<div class="card"><h3>${k.title}</h3><div class="metric-row">${(k.items||[]).map(i=>metric(i.n,i.l,i.cls)).join('')}</div>${k.insight?`<div class="reginsight" style="margin-top:12px">${k.insight}</div>`:''}${tbl}</div>`;
+}
+async function loadProd(e,rv){
+  const el=document.getElementById('prodcard'); if(!el) return;
+  const from=(rv.window&&rv.window.from)||'2025-10-01', to=isoToday();
+  let res; try{ res=await sb.rpc('svc_worker_productivity',{p_email:e.email,p_from:from,p_to:to}); }catch(err){ res={error:err}; }
+  const d=res&&res.data;
+  if(!el.isConnected) return;
+  if(res.error||!d||!d.me||!d.me.days_worked){ el.innerHTML=`<h3>Productivity — My Day and Ship Register</h3><div class="nostat">No My Day or Ship Register lines for ${esc(e.first)} in this period${res.error?' (the Ship Register is limited to its Masters)':''}.</div>`; return; }
+  const days=(d.days||[]).map(x=>(x.orders||0)+(x.transfers||0)+(x.assemblies||0)+(x.machining||0));
+  const notes=(d.days||[]).filter(x=>x.note).slice(-8).reverse();
+  const peers=d.peers||{}, dep=d.department||{};
+  el.innerHTML=`<h3>Productivity — My Day and Ship Register (vs peers)</h3>
+    <div class="metric-row">${metric(d.me.total,'Lines since '+fmtShort(d.from||from),'')}${metric(d.me.per_day,'Per working day',peers.avg_per_day&&d.me.per_day>=peers.avg_per_day?'good':'warn')}${metric(peers.rank?`${peers.rank} / ${peers.people}`:'—','Rank among pickers','')}${metric(peers.avg_per_day||'—','Picker average / day','')}${metric(dep.avg_per_day||'—',(dep.name||'Department')+' average / day','')}</div>
+    <div class="regbar" style="margin-top:10px"><div><div class="regsub">${d.me.days_worked} days worked · ${esc(d.person&&d.person.department||'')}</div></div>${spark(days,'var(--blue)')}</div>
+    ${notes.length?`<h3 style="margin-top:14px">End-of-day notes</h3><table><tbody>${notes.map(x=>`<tr><td class="date">${fmtShort(x.day)}</td><td>${esc(x.note)}</td></tr>`).join('')}</tbody></table>`:''}
+    <p class="notenote">Live from the Ship Register (svc). Lines from My Day where entered, otherwise from the register; the register starts Sep 2026.</p>`;
+}
+async function openDetail(id){
   const e = DATA.active.find(x=>x.id===id) || DATA.departed.find(x=>x.id===id); if(!e) return;
-  const k = e.key;
-  const rv = REVIEWS[k] && (e.review || (e.reason)) ? REVIEWS[k] : null;
-  const dv=$('#detailview'); let html=`<button class="backbtn" id="back">← Back to roster</button> <button class="backbtn" id="detailfb" style="background:var(--yellow);color:var(--black)">💬 Feedback</button>`;
+  const dv=$('#detailview');
+  $('#appview').classList.add('hidden'); dv.classList.remove('hidden');
+  dv.innerHTML=`<button class="backbtn" id="back">← Back to roster</button><div class="card"><p class="empname">${esc(e.first)} ${esc(e.last)}</p><p class="emprole">Loading review profile…</p></div>`;
+  $('#back').onclick=()=>{ dv.classList.add('hidden'); $('#appview').classList.remove('hidden'); window.scrollTo(0,0); };
+  window.scrollTo(0,0);
+  let row=null; try{ const { data } = await sb.rpc('hr_review_profile',{p_employee_id:id}); row=(data||[])[0]||null; }catch(err){ row=null; }
+  let rv=row&&row.profile; if(rv && (rv.v||1)>=2) rv=escDeep(rv);
+  let html=`<button class="backbtn" id="back">← Back to roster</button> <button class="backbtn" id="detailfb" style="background:var(--yellow);color:var(--black)">💬 Feedback</button>`;
   if(e.end) html+=`<div class="departbanner"><b>${e.reason||'Departed'} — last day ${fmtDate(e.end)}.</b> Kept for records; no longer on the active roster.</div>`;
   if(rv){
-    html+=`<div class="card"><p class="empname">${e.first} ${e.last}</p><p class="emprole">${e.title} &middot; ${e.dept} &middot; <a href="mailto:${e.email||''}">${e.email||''}</a></p>
-      <div class="goal"><b>Role &amp; goal</b>${rv.goal}</div>
-      <div class="facts"><div><span>Start</span><b>${fmtDate(e.start)}</b></div><div><span>Tenure</span><b>${e.tenure}</b></div><div><span>P21 role</span><b>${e.p21||'—'}</b></div></div>
-      <div style="margin-top:12px;font-size:12.5px;color:var(--muted);"><b style="color:var(--ink)">Review status:</b> ${rv.reviewStatus}</div></div>
-      ${rv.regInsight?`<div class="card"><h3>Ship Register</h3><div class="reginsight">${rv.regInsight}</div>${e.reg&&e.reg.total?fmtReg(e.reg)+dailyTable(e.reg):''}</div>`:''}
-      <div class="card"><h3>Department timeline</h3><div class="dept-badges">${rv.depts.map(x=>`<span class="deptbadge ${x.cur?'cur':''}">${x.n}</span>`).join(' ')}</div>${timeline(rv.timeline)}</div>
+    const nextRev=row.review_date?`${fmtDate(row.review_date)}${row.review_kind?' · '+esc(row.review_kind):''}`:'not set';
+    if(rv.draft) html+=`<div class="departbanner" style="border-color:var(--line)">Draft review profile prepared by Claude from Dynamics (${esc(rv.built||'')}; data ${fmtDate(rv.window&&rv.window.from)} – ${fmtDate(rv.window&&rv.window.to)}). Check each item in Dynamics before the meeting.</div>`;
+    if(rv.flags&&rv.flags.length) html+=`<div class="departbanner"><b>Check before the review</b><ul style="margin:6px 0 0 18px;padding:0">${rv.flags.map(f=>`<li>${f}</li>`).join('')}</ul></div>`;
+    html+=`<div class="card"><p class="empname">${esc(e.first)} ${esc(e.last)}</p><p class="emprole">${esc(e.title)} &middot; ${esc(e.dept)} &middot; <a href="mailto:${esc(e.email||'')}">${esc(e.email||'')}</a></p>
+      ${rv.goal?`<div class="goal"><b>Role &amp; goal</b>${rv.goal}</div>`:''}
+      <div class="facts"><div><span>Start</span><b>${fmtDate(e.start)}</b></div><div><span>Tenure</span><b>${e.tenure}</b></div><div><span>P21 role</span><b>${e.p21||'—'}</b></div><div><span>Next review</span><b>${nextRev}</b></div></div>
+      ${rv.departments&&rv.departments.length?`<div class="dept-badges" style="margin-top:10px">${rv.departments.map(x=>`<span class="deptbadge ${x===rv.home?'cur':''}">${x}</span>`).join(' ')}</div>`:''}
+      <div style="margin-top:12px;font-size:12.5px;color:var(--muted);"><b style="color:var(--ink)">Review status:</b> ${rv.reviewStatus||''}</div></div>`;
+    html+=kpiBlock(rv.kpis);
+    if(rv.territory) html+=`<div class="card"><h3>Territory ${rv.territory.code}</h3><div class="reginsight">${rv.territory.note}</div></div>`;
+    if(rv.regInsight||(e.reg&&e.reg.total)) html+=`<div class="card"><h3>Ship Register</h3>${rv.regInsight?`<div class="reginsight">${rv.regInsight}</div>`:''}${e.reg&&e.reg.total?fmtReg(e.reg)+dailyTable(e.reg):''}</div>`;
+    if(rv.productivityCard) html+=`<div class="card" id="prodcard"><h3>Productivity — My Day and Ship Register</h3><div class="nostat">Loading…</div></div>`;
+    html+=`<div class="card"><h3>Department timeline</h3><div class="dept-badges">${(rv.depts||[]).map(x=>`<span class="deptbadge ${x.cur?'cur':''}">${x.n}</span>`).join(' ')}</div>${timeline(rv.timeline||[])}</div>
       <div class="two colwrap"><div class="card"><h3>Training &amp; assessments</h3>${training(rv.training)}</div>
-      <div class="card"><h3>Attendance</h3><div class="rating"><span class="score ${rv.attendance.rating}">${rv.attendance.label}</span></div><div class="metric-row">${metric(rv.attendance.late,'Late',rv.attendance.late>3?'bad':(rv.attendance.late>0?'warn':'good'))}${metric(rv.attendance.absent,'Absences',rv.attendance.absent>0?'warn':'good')}${metric(rv.attendance.appt,'Planned','')}</div><p style="font-size:12.5px;color:var(--muted);margin-top:12px;">${rv.attendance.note}</p></div></div>
-      <div class="card"><h3>Picking accuracy (volume-normalized)</h3>${nvaBlock(rv.nva)}</div>
-      <div class="two colwrap"><div class="card"><h3>Very Awesome (VA)</h3>${vaBlock(rv.va)}</div><div class="card"><h3>HR notes</h3>${notesBlock(rv.notes)}</div></div>
-      <div class="card"><h3>Overall assessment</h3><div class="assess"><p class="lead">${rv.assess.lead}</p>${rv.assess.body.map(b=>`<p>${b}</p>`).join('')}</div><div class="rec"><b>Recommendation</b>${rv.rec}</div></div>`;
+      <div class="card"><h3>Attendance</h3>${attBlock(rv.attendance||{})}</div></div>
+      <div class="card"><h3>${(rv.nva&&rv.nva.title)||'Picking accuracy (volume-normalized)'}</h3>${nvaBlock(rv.nva||{})}</div>
+      <div class="two colwrap"><div class="card"><h3>Very Awesome (VA)</h3>${vaBlock(rv.va,rv.vaGiven)}</div><div class="card"><h3>HR notes</h3>${notesBlock(rv.notes)}</div></div>
+      <div class="card"><h3>Overall assessment${rv.draft?' <span class="assessbadge">draft</span>':''}</h3><div class="assess"><p class="lead">${(rv.assess&&rv.assess.lead)||''}</p>${((rv.assess&&rv.assess.body)||[]).map(b=>`<p>${b}</p>`).join('')}</div><div class="rec"><b>Recommendation</b>${rv.rec||''}</div></div>`;
   } else {
-    html+=`<div class="card"><p class="empname">${e.first} ${e.last}</p><p class="emprole">${e.title} &middot; ${e.dept} Dept &middot; <a href="mailto:${e.email||''}">${e.email||''}</a></p>
+    html+=`<div class="card"><p class="empname">${esc(e.first)} ${esc(e.last)}</p><p class="emprole">${esc(e.title)} &middot; ${esc(e.dept)} Dept &middot; <a href="mailto:${esc(e.email||'')}">${esc(e.email||'')}</a></p>
       <div class="facts"><div><span>Start</span><b>${fmtDate(e.start)}</b></div><div><span>Tenure</span><b>${e.tenure}</b></div><div><span>P21 role</span><b>${e.p21||'—'}</b></div><div><span>Status</span><b>${e.status}${e.reason?' ('+e.reason+')':''}</b></div></div></div>
       <div class="card"><h3>Ship Register productivity</h3>${e.reg&&e.reg.total?`<div class="reginsight">${e.first} logged <b>${e.reg.total} ${e.reg.type==='pick'?'picks':'orders'}</b> — ${e.reg.avg}/day across ${e.reg.active} active days.</div>${fmtReg(e.reg)}${dailyTable(e.reg)}`:fmtReg(e.reg)}</div>
-      <div class="card"><h3>Deeper review</h3><p style="font-size:13px;color:var(--muted)">Ongoing-review profile. Attendance, NVA accuracy, training and VA detail can be pulled from Dynamics for ${e.first} on request; the review-due employees carry that full detail now.</p></div>`;
+      <div class="card"><h3>Review profile</h3><p style="font-size:13px;color:var(--muted)">No review profile is available for ${esc(e.first)} on this account.</p></div>`;
   }
-  $('#appview').classList.add('hidden'); $('#departsec')&&null;
-  dv.classList.remove('hidden'); dv.innerHTML=html;
+  dv.innerHTML=html;
   $('#back').onclick=()=>{ dv.classList.add('hidden'); $('#appview').classList.remove('hidden'); window.scrollTo(0,0); };
   $('#detailfb').onclick=()=>openFeedback(e.id, `${e.first} ${e.last}`);
-  window.scrollTo(0,0);
+  if(rv&&rv.productivityCard) loadProd(e,rv);
 }
 // ---------- feedback (per-employee, mirrored to the Dynamics notepad) ----------
 let FB_EMP=null;
@@ -268,5 +324,5 @@ document.querySelectorAll('.fbtb').forEach(btn=>{
   btn.addEventListener('click',(ev)=>{ ev.preventDefault(); $('#fbtext').focus(); try{ document.execCommand(btn.dataset.cmd,false,null); }catch(e){} });
 });
 
-$('#foot').innerHTML=`Live from Dynamics 365 via a gated Supabase layer (HR-only). Employee, team and directory data refresh nightly; the Ship Register is loaded monthly. Access is limited to the HR allow-list. Picking accuracy normalizes NVA errors against handling volume. Name mapping notes: register "Suzie" → Elrica Barrett and the single "Kevin" picker → Kevin Blair are unconfirmed; CINDY/MERRYL share order code 675. — Fluidseal HR Portal`;
+$('#foot').innerHTML=`Live from Dynamics 365 via a gated Supabase layer (HR-only). Employee, team and directory data refresh nightly; the Ship Register is loaded monthly; review profiles are prepared from Dynamics and served only to signed-in HR viewers. Access is limited to the HR allow-list. Picking accuracy normalizes NVA errors against handling volume. Name mapping notes: register "Suzie" → Elrica Barrett and the single "Kevin" picker → Kevin Blair are unconfirmed; CINDY/MERRYL share order code 675. — Fluidseal HR Portal`;
 boot();
