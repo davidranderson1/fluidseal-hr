@@ -6,8 +6,10 @@ const SUPA_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIs
 const sb = supabase.createClient(SUPA_URL, SUPA_ANON);
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-let WHO = null, CAT = [], DAY = null, PREV = null, MONTH = null;
-const ST = { tab: "entry", day: null, month: null };
+let WHO = null, CAT = [], DAY = null, PREV = null, MONTH = null, DLY = null;
+// The submit email links here as register.html?daily=YYYY-MM-DD (a query, so it survives the sign-in link); #daily= works too.
+const START_DAILY = (() => { const q = new URLSearchParams(location.search).get("daily") || (location.hash.match(/daily=(\d{4}-\d\d-\d\d)/) || [])[1] || ""; return /^\d{4}-\d\d-\d\d$/.test(q) ? q : null; })();
+const ST = { tab: START_DAILY ? "daily" : "entry", day: null, month: null, dday: START_DAILY };
 
 // ---------- auth ----------
 async function boot() {
@@ -17,10 +19,13 @@ async function boot() {
   const { data, error } = await sb.rpc("svc_whoami");
   if (error || !data || !data.signed_in) { deny("No access", `Signed in as <b>${esc(session.user.email)}</b>, but access could not be confirmed. Try signing out and in again.`); return; }
   WHO = data;
+  if (!WHO.entry && WHO.worker) { location.replace("myday.html"); return; }   // pickers have their own page
   if (!WHO.entry) { deny("No access", `Signed in as <b>${esc(WHO.email)}</b>. The Ship Register is open to the people Cindy adds for the nightly entry, HR and sales management.`); return; }
   try { CAT = await rpc("svc_sr_catalog"); } catch (e) { deny("Could not load", esc(e.message)); return; }
   ST.day = defaultEntryDay(WHO.today);
   ST.month = String(ST.day).slice(0, 7);
+  if (ST.tab === "daily" && !WHO.master) ST.tab = "entry";
+  if (!ST.dday) ST.dday = defaultEntryDay(WHO.today);
   show("app");
   renderShell();
   go(ST.tab);
@@ -44,7 +49,7 @@ $("#sendlink").onclick = async () => {
   if (error) { msg.className = "msg err"; msg.textContent = error.message; }
   else { msg.className = "msg ok"; msg.textContent = "Check your email for the sign-in link, then come back to this page."; }
 };
-sb.auth.onAuthStateChange((ev) => { if (ev === "SIGNED_IN") { history.replaceState(null, "", location.pathname); boot(); } });
+sb.auth.onAuthStateChange((ev) => { if (ev === "SIGNED_IN") { history.replaceState(null, "", location.pathname + (ST.dday && ST.tab === "daily" ? "?daily=" + ST.dday : "")); boot(); } });
 
 // ---------- helpers ----------
 async function rpc(name, args) { const { data, error } = await sb.rpc(name, args || {}); if (error) throw new Error(error.message); return data; }
@@ -80,6 +85,7 @@ function fieldType(m, v) {
   if (m.plan === "computed") return "calc";
   const src = String((v && v.source) || "");
   if (src.startsWith("p21:")) return "report";
+  if (src.startsWith("picker:")) return "picker";   // typed by the picker on My Day (2026-10-02) — locked like a report line
   if (src === "override") return "override";
   return m.plan === "carry" ? "carry" : "typed";
 }
@@ -102,6 +108,7 @@ function legendHtml() {
     <span><i class="sw t-carry">12</i><b>Carried</b> — starts from the last day; change it only when it changes</span>
     <span><i class="sw t-report">🔒 12</i><b>From a report</b> — locked; fills itself when the P21 report arrives${WHO && WHO.master ? " (Masters can override)" : ""}</span>
     <span><i class="sw t-calc">= 12</i><b>Calculated</b> — locked; worked out from other lines</span>
+    <span><i class="sw t-report t-picker">🔒 12</i><b>From My Day</b> — the picker typed it on their own page; locked${WHO && WHO.master ? " (Masters can override)" : ""}</span>
     <span><span class="badge soon">report coming</span> typed until its report is set up — then it locks</span>
   </div>`;
 }
@@ -113,14 +120,14 @@ function renderShell() {
   $("#modeswitch").innerHTML = (WHO.master || WHO.person ? `<a class="backlink" href="service.html">Service Score</a>` : "");
   $("#intro").innerHTML = `The digital copy of the nightly Ship Register email. Every line is one of four kinds: <b>typed</b>, <b>carried</b> from the last day, <b>from a report</b> (locked) or <b>calculated</b> (locked). <span class="badge auto">Dynamics check</span> shows what Dynamics saw. September is loaded from Cindy's email of 09/29.`;
   $("#bannerbox").innerHTML = "";
-  $("#controls").innerHTML = [["entry", "Tonight's entry"], ["month", "Month (email layout)"], ["plan", "What you can stop typing"]].map(([k, l]) => `<button class="chip" data-tab="${k}">${l}</button>`).join("");
+  $("#controls").innerHTML = [["entry", "Tonight's entry"], ...(WHO.master ? [["daily", "Daily View"]] : []), ["month", "Month (email layout)"], ["plan", "What you can stop typing"]].map(([k, l]) => `<button class="chip" data-tab="${k}">${l}</button>`).join("");
   $("#controls").querySelectorAll("[data-tab]").forEach((c) => (c.onclick = () => go(c.dataset.tab)));
   $("#foot").innerHTML = `Ship Register — stored in a gated Supabase layer (schema svc). Only the people on the Ship Register list, HR and sales management can open it. Entry users can change the last 7 days; older days and CLOSED days are changed by a Master user. — Fluidseal HR Portal`;
 }
 function go(tab) {
   ST.tab = tab;
   $("#controls").querySelectorAll("[data-tab]").forEach((c) => c.classList.toggle("active", c.dataset.tab === tab));
-  if (tab === "entry") loadEntry(); else if (tab === "month") loadMonth(); else loadPlan();
+  if (tab === "entry") loadEntry(); else if (tab === "daily") loadDaily(); else if (tab === "month") loadMonth(); else loadPlan();
 }
 
 // ---------- entry ----------
@@ -149,18 +156,19 @@ async function loadEntry() {
       const v = DAY.values[m.key], carry = DAY.carry[m.key], sugg = (DAY.suggest[m.key] || [])[0], pv = PREV && PREV.values[m.key];
       let val = v ? (m.kind === "text" ? v.txt : v.num) : null, carried = false;
       if (val == null && m.plan === "carry" && carry && !closed) { val = m.kind === "text" ? carry.txt : carry.num; carried = true; }
-      const t = fieldType(m, v), rl = t === "report" || (t === "override" && !WHO.master);
+      const t = fieldType(m, v), rl = t === "report" || t === "picker" || (t === "override" && !WHO.master);
       const hints = [];
       if (t === "calc") hints.push(`<span class="badge computed">= calculated</span><span>${esc(formulaText(m))}</span>`);
       if (t === "report") hints.push(`<span class="badge report">🔒 from report</span><span>${esc(String(v.source).slice(4))}${v.at ? " · " + esc(whenMt(v.at)) : ""}</span>${WHO.master && !locked ? `<button class="linkbtn" data-ovr="${m.key}">override</button>` : ""}`);
-      if (t === "override") hints.push(`<span class="badge override">${WHO.master ? "overridden" : "🔒 overridden"}</span><span>report number changed by ${esc(v.by || "a Master")}</span>`);
+      if (t === "picker") hints.push(`<span class="badge pickr">🔒 from My Day</span><span>${esc(String(v.source).slice(7))}${v.at ? " · " + esc(whenMt(v.at)) : ""}</span>${WHO.master && !locked ? `<button class="linkbtn" data-ovr="${m.key}">override</button>` : ""}`);
+      if (t === "override") hints.push(`<span class="badge override">${WHO.master ? "overridden" : "🔒 overridden"}</span><span>number changed by ${esc(v.by || "a Master")}</span>`);
       if (carried) hints.push(`<span class="badge carry">carried from ${esc(mmdd(carry.day))}</span>`);
       else if (m.plan === "carry") hints.push(`<span class="badge carry">carried line</span>`);
       if (m.feed && t !== "report" && t !== "override") hints.push(`<span class="badge soon" title="${esc(m.feed)}">report coming</span>`);
       if (sugg) hints.push(`<span class="badge auto">Dynamics: ${esc(fmtNum(m, sugg.num))}</span>${t !== "calc" && !rl && !locked ? ` <button class="linkbtn" data-use="${m.key}" data-val="${esc(sugg.num)}">use it</button>` : ""}`);
       if (pv) hints.push(`<span>last day: ${esc(fmtNum(m, m.kind === "text" ? pv.txt : pv.num))}</span>`);
       if (v && String(v.source || "").startsWith("import")) hints.push(`<span>from the email</span>`);
-      const cls = t === "calc" ? "t-calc" : t === "report" ? "t-report" : t === "override" ? "t-override" + (rl ? " t-locked" : "") : (m.plan === "carry" ? "t-carry" : "t-typed");
+      const cls = t === "calc" ? "t-calc" : t === "report" ? "t-report" : t === "picker" ? "t-report t-picker" : t === "override" ? "t-override" + (rl ? " t-locked" : "") : (m.plan === "carry" ? "t-carry" : "t-typed");
       h += `<div class="erow" title="${esc(m.source_note || "")}"><label for="f_${m.key}">${esc(m.label)}${m.code ? `<span class="code">${esc(m.code)}</span>` : ""}</label>
         <input id="f_${m.key}" class="${cls}" data-key="${m.key}" data-kind="${m.kind}" data-lock="${rl ? 1 : 0}" ${t === "calc" || rl || locked ? "readonly" : ""} ${m.kind === "text" ? "" : 'inputmode="decimal"'} value="${esc(val == null ? "" : fmtNum(m, val).replace("%", ""))}" data-orig="${esc(val == null ? "" : String(val))}" data-carried="${carried ? 1 : 0}">
         ${hints.length ? `<div class="hint">${hints.join(" · ")}</div>` : ""}</div>`;
@@ -180,7 +188,7 @@ async function loadEntry() {
   $("#dpick").onchange = (e) => { if (e.target.value) { ST.day = e.target.value; loadEntry(); } };
   document.querySelectorAll("#content input[data-key]").forEach((i) => i.addEventListener("input", () => { i.classList.toggle("changed", i.value !== i.dataset.orig); recompute(); }));
   document.querySelectorAll("[data-use]").forEach((b) => (b.onclick = () => { const i = $(`#f_${b.dataset.use}`); i.value = b.dataset.val; i.classList.add("changed"); recompute(); }));
-  document.querySelectorAll("[data-ovr]").forEach((b) => (b.onclick = () => { const i = $(`#f_${b.dataset.ovr}`); i.readOnly = false; i.dataset.lock = "0"; i.classList.remove("t-report"); i.classList.add("t-override"); b.replaceWith(Object.assign(document.createElement("span"), { textContent: "unlocked — your number will be marked overridden" })); i.focus(); i.select(); }));
+  document.querySelectorAll("[data-ovr]").forEach((b) => (b.onclick = () => { const i = $(`#f_${b.dataset.ovr}`); i.readOnly = false; i.dataset.lock = "0"; i.classList.remove("t-report", "t-picker"); i.classList.add("t-override"); b.replaceWith(Object.assign(document.createElement("span"), { textContent: "unlocked — your number will be marked overridden" })); i.focus(); i.select(); }));
   if ($("#savedraft")) $("#savedraft").onclick = () => save(false);
   if ($("#submitday")) $("#submitday").onclick = () => save(true);
   if ($("#markclosed")) $("#markclosed").onclick = () => setStatus("closed");
@@ -222,6 +230,130 @@ async function setStatus(status) {
   catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
 }
 
+// ---------- Daily View (Masters) — David 2026-10-02: "a Daily View and some performance metrics compared to previous
+// day/weeks for that employee and each other for management to see". One call (svc_sr_daily) returns the day and the 25
+// open days before it; previous day, same day last week and the 4-week (20 working days) average are worked out here.
+const DHEAD = [ // key, label, higher is better
+  ["total_orders", "Total orders", true], ["total_items", "Total items", true], ["item_per_picker", "Items per picker", true],
+  ["pick_hold_pct", "Pick & hold %", false], ["orders_not_picked", "Orders not picked", false], ["ph_not_picked", "Pick & hold not picked", false],
+  ["production_total", "Production total", true], ["order_takers", "Orders by takers", true],
+];
+function dcmp(d) {
+  const V = {}; for (const [day, key, num] of d.values) (V[day] = V[day] || {})[key] = Number(num);
+  const open = d.hist_days.filter((x) => x.status !== "closed" && V[x.day]).map((x) => x.day).sort();
+  const before = open.filter((x) => x < d.day);
+  const prev = before.length ? before[before.length - 1] : null;
+  const week = V[addDays(d.day, -7)] ? addDays(d.day, -7) : null;
+  const avgDays = before.slice(-20);
+  const val = (day, k) => (day && V[day] && V[day][k] != null ? V[day][k] : null);
+  const avg = (k, f) => { const xs = avgDays.map((x) => (f ? f(x) : val(x, k))).filter((x) => x != null); return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null; };
+  return { V, prev, week, avgDays, val, avg, series: (f) => [...avgDays, d.day].map(f) };
+}
+function dfmt(n, pct) { if (n == null) return "—"; const r = Math.round(n * 10) / 10; return (Number.isInteger(r) ? String(r) : r.toFixed(1)) + (pct ? "%" : ""); }
+function ddelta(cur, base, good, pct) {
+  if (cur == null || base == null) return `<span class="pct na">—</span>`;
+  const diff = cur - base; if (Math.abs(diff) < 0.05) return `<span class="pct na">same</span>`;
+  const up = diff > 0, ok = up === good, rel = base && !pct ? ` (${up ? "+" : "−"}${Math.round(Math.abs(diff / base) * 100)}%)` : "";
+  return `<span class="pct ${ok ? "good" : "bad"}">${up ? "▲" : "▼"} ${dfmt(Math.abs(diff), pct)}${rel}</span>`;
+}
+function spark(vals, w = 120, h = 28) {
+  const xs = vals.map((v) => (v == null ? null : Number(v))); const ok = xs.filter((v) => v != null);
+  if (ok.length < 2) return "";
+  const mn = Math.min(...ok), mx = Math.max(...ok), sp = mx - mn || 1, step = w / Math.max(1, xs.length - 1);
+  const pts = xs.map((v, i) => (v == null ? null : `${(i * step).toFixed(1)},${(h - 3 - ((v - mn) / sp) * (h - 6)).toFixed(1)}`)).filter(Boolean);
+  const last = pts[pts.length - 1].split(",");
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline points="${pts.join(" ")}" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="${last[0]}" cy="${last[1]}" r="2.6" fill="var(--yellow)" stroke="currentColor" stroke-width="1"/></svg>`;
+}
+async function loadDaily() {
+  if (!WHO.master) { $("#content").innerHTML = `<div class="card"><div class="empty">The Daily View is for HR and sales management.</div></div>`; return; }
+  $("#content").innerHTML = `<div class="loading">Loading the Daily View for ${esc(ST.dday)}…</div>`;
+  try { DLY = await rpc("svc_sr_daily", { p_day: ST.dday }); } catch (e) { $("#content").innerHTML = `<div class="card"><div class="msg err">${esc(e.message)}</div></div>`; return; }
+  try { history.replaceState(null, "", location.pathname + "?daily=" + ST.dday); } catch (e) { /* ignore */ }
+  const d = DLY, c = dcmp(d), day = d.day, meta = d.meta || {};
+  const prevTxt = c.prev ? `${fmtDay(c.prev).split(",")[0].slice(0, 3)} ${mmdd(c.prev)}` : "previous day";
+  const weekTxt = c.week ? `${fmtDay(c.week).split(",")[0].slice(0, 3)} ${mmdd(c.week)}` : "same day last week";
+  const W = d.workers || [], work = (d.work || []).filter((x) => x.day === day), wk = (k) => work.find((x) => x.worker === k);
+  const mail = d.mail;
+  let h = `<div class="card"><div class="controls" style="margin:0">
+      <button class="chip" id="ddprev">◀</button><input type="date" id="ddpick" value="${day}" max="${WHO.today}"><button class="chip" id="ddnext" ${day >= WHO.today ? "disabled" : ""}>▶</button>
+      <b style="font-size:15px;margin-left:6px">${esc(fmtDay(day))}</b>
+      <span class="status ${esc(meta.status || "draft")}">${meta.status ? esc(meta.status) : "not started"}</span>
+      ${meta.submitted_by ? `<span class="sub">submitted by ${esc(meta.submitted_name || meta.submitted_by)} · ${esc(whenMt(meta.submitted_at))}</span>` : ""}
+      <span style="flex:1"></span><button class="btn small line" id="ddentry">Open the entry</button><button class="btn small line" id="ddcopy">Copy link</button><span class="msg" id="ddmsg"></span>
+    </div>
+    <p class="sub" style="margin:8px 0 0">Compared with <b>${esc(prevTxt)}</b> (last working day), <b>${esc(weekTxt)}</b> and the <b>4-week average</b> (${c.avgDays.length} working days before). Green = better, red = worse — for "not picked" and pick &amp; hold, lower is better.
+    ${mail ? ` Email: ${mail.sent_at ? `sent ${esc(whenMt(mail.sent_at))} to ${esc(mail.sent_to || "")}` : mail.last_error ? `not sent yet (${esc(mail.last_error)})` : "queued — goes out within 5 minutes"}.` : ""}</p></div>`;
+  if (!c.val(day, "total_orders") && !work.length) h += `<div class="banner">Nothing entered for this day yet.</div>`;
+  // KPI tiles
+  h += `<div class="dkpis">` + DHEAD.map(([k, label, good]) => {
+    const cur = c.val(day, k), pct = k === "pick_hold_pct", a = c.avg(k);
+    return `<div class="kpi dk"><div class="l">${esc(label)}</div><div class="n">${dfmt(cur, pct)}</div>
+      <div class="dl"><span>vs ${esc(mmdd(c.prev || day))}</span>${ddelta(cur, c.val(c.prev, k), good, pct)}</div>
+      <div class="dl"><span>vs last week</span>${ddelta(cur, c.val(c.week, k), good, pct)}</div>
+      <div class="dl"><span>vs 4-wk avg ${dfmt(a, pct)}</span>${ddelta(cur, a, good, pct)}</div>
+      <div class="sp">${spark(c.series((x) => c.val(x, k)))}</div></div>`;
+  }).join("") + `</div>`;
+  // pickers side by side
+  const people = W.filter((w) => w.pick_key).map((w) => {
+    const o = c.val(day, w.pick_key), t = w.xfer_key ? c.val(day, w.xfer_key) : null, my = wk(w.key);
+    const tot = (o || 0) + (t || 0);
+    const ownAvg = c.avg(null, (x) => { const a = c.val(x, w.pick_key), b = w.xfer_key ? c.val(x, w.xfer_key) : null; return a == null && b == null ? null : (a || 0) + (b || 0); });
+    const prevTot = c.prev ? (c.val(c.prev, w.pick_key) || 0) + (w.xfer_key ? c.val(c.prev, w.xfer_key) || 0 : 0) : null;
+    return { w, o, t, tot, my, ownAvg, prevTot, ser: c.series((x) => (c.val(x, w.pick_key) == null && (!w.xfer_key || c.val(x, w.xfer_key) == null) ? null : (c.val(x, w.pick_key) || 0) + (w.xfer_key ? c.val(x, w.xfer_key) || 0 : 0))) };
+  });
+  const active = people.filter((p) => p.tot > 0), team = active.reduce((a, p) => a + p.tot, 0), teamAvg = active.length ? team / active.length : null;
+  const maxTot = Math.max(1, ...people.map((p) => p.tot));
+  people.sort((a, b) => b.tot - a.tot || (b.ownAvg || 0) - (a.ownAvg || 0));
+  h += `<div class="card"><h3>Pickers — side by side (orders + transfers picked)</h3><div class="scroll"><table class="tbl"><thead><tr><th>Who</th><th class="num">Orders</th><th class="num">Transfers</th><th class="num">Assemblies</th><th class="num">Machining</th><th>Total &amp; share</th><th class="num">vs ${esc(mmdd(c.prev || day))}</th><th class="num">vs own 4-wk avg</th><th class="num">vs team avg</th><th>Trend</th><th>End-of-day note</th></tr></thead><tbody>`;
+  for (const p of people) {
+    const src = p.w.pick_key && c.V[day] ? (d.values.find((v) => v[0] === day && v[1] === p.w.pick_key) || [])[3] : null;
+    h += `<tr class="${p.tot ? "" : "idle"}"><td><b>${esc(p.w.name)}</b><div class="sub">${esc(p.w.department || "")}${String(src || "").startsWith("picker:") ? ` · <span class="badge pickr">My Day</span>` : ""}</div></td>
+      <td class="num">${dfmt(p.o)}</td><td class="num">${dfmt(p.t)}</td><td class="num">${p.my && p.my.assemblies != null ? p.my.assemblies : "—"}</td><td class="num">${p.my && p.my.machining != null ? p.my.machining : "—"}</td>
+      <td style="min-width:150px"><div class="share"><i style="width:${Math.round((100 * p.tot) / maxTot)}%"></i></div><span class="sub"><b>${p.tot}</b>${team ? ` · ${Math.round((100 * p.tot) / team)}% of the team` : ""}</span></td>
+      <td class="num">${p.tot || p.prevTot ? ddelta(p.tot, p.prevTot, true) : "—"}</td><td class="num">${p.ownAvg != null ? `${ddelta(p.tot, p.ownAvg, true)}<div class="sub">avg ${dfmt(p.ownAvg)}</div>` : "—"}</td>
+      <td class="num">${p.tot && teamAvg ? ddelta(p.tot, teamAvg, true) : "—"}</td><td>${spark(p.ser, 90, 24)}</td><td class="sub" style="max-width:260px">${esc((p.my && p.my.note) || "")}</td></tr>`;
+  }
+  h += `</tbody></table></div><p class="sub" style="margin-top:8px">Team today: ${team} picks by ${active.length} people (average ${dfmt(teamAvg)} each). Assemblies, machining and notes come from each picker's <a href="myday.html">My Day</a> page once they use it.</p></div>`;
+  // order takers
+  const takers = CAT.filter((m) => m.key.startsWith("taker_")).map((m) => ({ m, v: c.val(day, m.key), a: c.avg(m.key), p: c.val(c.prev, m.key), ser: c.series((x) => c.val(x, m.key)) })).filter((x) => x.v || x.a);
+  const ttot = takers.reduce((a, x) => a + (x.v || 0), 0), tmax = Math.max(1, ...takers.map((x) => x.v || 0));
+  takers.sort((a, b) => (b.v || 0) - (a.v || 0));
+  h += `<div class="grid2"><div class="card"><h3>Order takers</h3><div class="scroll"><table class="tbl"><thead><tr><th>Taker</th><th>Orders &amp; share</th><th class="num">vs ${esc(mmdd(c.prev || day))}</th><th class="num">vs 4-wk avg</th><th>Trend</th></tr></thead><tbody>` +
+    takers.map((x) => `<tr><td><b>${esc(x.m.label)}</b> <span class="sub">${esc(x.m.code || "")}</span></td><td style="min-width:130px"><div class="share"><i style="width:${Math.round((100 * (x.v || 0)) / tmax)}%"></i></div><span class="sub"><b>${dfmt(x.v)}</b>${ttot ? ` · ${Math.round((100 * (x.v || 0)) / ttot)}%` : ""}</span></td><td class="num">${ddelta(x.v, x.p, true)}</td><td class="num">${ddelta(x.v, x.a, true)}<div class="sub">avg ${dfmt(x.a)}</div></td><td>${spark(x.ser, 80, 22)}</td></tr>`).join("") +
+    `</tbody></table></div><p class="sub" style="margin-top:6px">The Service Score has each taker's quality side: <a href="service.html">Service Score</a>.</p></div>`;
+  // production + picking backlog
+  const PROD = [["mmo_new", "Machining orders — new", true], ["mmo_complete", "Machining orders — complete", true], ["mmo_incomplete_all", "Machining — incomplete (all)", false], ["mms_new", "Machining stock — new", true], ["aao_new", "Assembly orders — new", true], ["aas_bo_assem", "Assembly stock — B/O", false], ["kit_building", "Kit building", true], ["orders_not_picked", "Orders not picked", false], ["cannot_locate", "Cannot locate", false]];
+  h += `<div class="card"><h3>Production &amp; backlog</h3><div class="scroll"><table class="tbl"><thead><tr><th>Line</th><th class="num">${esc(mmdd(day))}</th><th class="num">vs ${esc(mmdd(c.prev || day))}</th><th class="num">vs 4-wk avg</th></tr></thead><tbody>` +
+    PROD.filter(([k]) => c.val(day, k) != null || c.avg(k)).map(([k, l, g]) => `<tr><td>${esc(l)}</td><td class="num"><b>${dfmt(c.val(day, k))}</b></td><td class="num">${ddelta(c.val(day, k), c.val(c.prev, k), g)}</td><td class="num">${ddelta(c.val(day, k), c.avg(k), g)}<div class="sub">avg ${dfmt(c.avg(k))}</div></td></tr>`).join("") +
+    `</tbody></table></div>${meta.note ? `<div class="whynote">Note on the day: ${esc(meta.note)}</div>` : ""}</div></div>`;
+  // pickers & sign-in (My Day)
+  h += `<div class="card" id="workers"><h3>Pickers on My Day — sign-in and priorities</h3>
+    <p class="sub" style="margin:0 0 8px">Each picker signs in at <a href="myday.html">hr.fluidsealab.com/myday.html</a> with their work email on their own PC and types orders, transfers, assemblies, machining and an end-of-day note; their orders and transfers fill their Ship Register lines (locked, a Master can override). Sign-in is off until it is switched on here. Priorities 1–4 come from the paper Productivity Report and show on their page.</p>
+    <div class="scroll"><table class="tbl"><thead><tr><th>Picker</th><th>Work email</th><th>Department (Dynamics)</th><th>Priorities 1–4 (comma list)</th><th>Sign-in</th><th></th></tr></thead><tbody>` +
+    W.map((w) => `<tr data-wk="${esc(w.key)}"><td><b>${esc(w.name)}</b>${w.note ? `<div class="sub">${esc(w.note)}</div>` : ""}</td>
+      <td><input class="inp" data-f="email" value="${esc(w.email || "")}" placeholder="name@sealsonline.com" style="width:210px"></td>
+      <td><input class="inp" data-f="department" value="${esc(w.department || "")}" style="width:130px"></td>
+      <td><input class="inp" data-f="priorities" value="${esc((w.priorities || []).join(", "))}" style="width:260px"></td>
+      <td><label class="sub"><input type="checkbox" data-f="active" ${w.active ? "checked" : ""}> on</label></td>
+      <td><button class="btn small" data-save="${esc(w.key)}">Save</button> <span class="msg" data-m="${esc(w.key)}"></span></td></tr>`).join("") +
+    `</tbody></table></div></div>`;
+  $("#content").innerHTML = h;
+  $("#ddprev").onclick = () => { ST.dday = stepDay(ST.dday, -1); loadDaily(); };
+  $("#ddnext").onclick = () => { const n = stepDay(ST.dday, 1); if (n <= WHO.today) { ST.dday = n; loadDaily(); } };
+  $("#ddpick").onchange = (e) => { if (e.target.value) { ST.dday = e.target.value; loadDaily(); } };
+  $("#ddentry").onclick = () => { ST.day = ST.dday; go("entry"); };
+  $("#ddcopy").onclick = async () => { const u = location.origin + location.pathname + "?daily=" + ST.dday; try { await navigator.clipboard.writeText(u); $("#ddmsg").className = "msg ok"; $("#ddmsg").textContent = "Link copied"; } catch (e) { $("#ddmsg").className = "msg"; $("#ddmsg").textContent = u; } };
+  document.querySelectorAll("[data-save]").forEach((b) => (b.onclick = async () => {
+    const k = b.dataset.save, row = document.querySelector(`tr[data-wk="${k}"]`), m = document.querySelector(`[data-m="${k}"]`), w = W.find((x) => x.key === k);
+    const f = (n) => row.querySelector(`[data-f="${n}"]`);
+    try {
+      await rpc("svc_sr_worker_set", { p_key: k, p_name: w.name, p_email: f("email").value.trim() || null, p_priorities: f("priorities").value.split(",").map((s) => s.trim()).filter(Boolean),
+        p_active: f("active").checked, p_department: f("department").value.trim() || null });
+      m.className = "msg ok"; m.textContent = "Saved ✓";
+    } catch (e) { m.className = "msg err"; m.textContent = e.message; }
+  }));
+}
+
 // ---------- month grid (mirrors the email) ----------
 async function loadMonth() {
   $("#content").innerHTML = `<div class="loading">Loading ${esc(ST.month)}…</div>`;
@@ -232,7 +364,7 @@ async function loadMonth() {
   let h = `<div class="card"><div class="controls" style="margin-bottom:10px"><input type="month" id="mpick" value="${ST.month}">
     <button class="btn small" id="copyout">Copy table for Outlook</button><button class="btn small line" id="csv">Download CSV</button><span class="msg" id="mmsg"></span></div>
     <div class="scroll"><table class="srgrid" id="srgrid">${gridHtml(cols, V, S, false)}</table></div>
-    <p class="sub" style="margin-top:8px">Same rows and weekly blocks as the Ship Register email. Key: <span class="key man">typed on this page</span> · <span class="key rep">from a report</span> · <span class="key ovr">report overridden</span> · <i>italic</i> = calculated · plain = imported from the email. Click a date to open that day.</p></div>`;
+    <p class="sub" style="margin-top:8px">Same rows and weekly blocks as the Ship Register email. Key: <span class="key man">typed on this page</span> · <span class="key rep">from a report</span> · <span class="key pk">from My Day</span> · <span class="key ovr">report overridden</span> · <i>italic</i> = calculated · plain = imported from the email. Click a date to open that day.</p></div>`;
   $("#content").innerHTML = h;
   $("#mpick").onchange = (e) => { if (e.target.value) { ST.month = e.target.value; loadMonth(); } };
   document.querySelectorAll("#srgrid th[data-day]").forEach((t) => (t.onclick = () => { ST.day = t.dataset.day; go("entry"); }));
@@ -258,7 +390,7 @@ function gridHtml(cols, V, S, plain) {
     for (const d of cols) {
       const st = S[d];
       if (st && st.status === "closed") h += `<td class="closed">CLOSED</td>`;
-      else { const c = (V[d] || {})[m.key]; const v = c ? (m.kind === "text" ? c.t : c.n) : null; const src = c ? String(c.src || "") : ""; const cls = !c || plain ? "" : src === "computed" ? "comp" : src.startsWith("p21:") ? "rep" : src === "override" ? "ovr" : src === "manual" ? "man" : ""; h += `<td class="${cls}">${esc(fmtNum(m, v))}</td>`; }
+      else { const c = (V[d] || {})[m.key]; const v = c ? (m.kind === "text" ? c.t : c.n) : null; const src = c ? String(c.src || "") : ""; const cls = !c || plain ? "" : src === "computed" ? "comp" : src.startsWith("p21:") ? "rep" : src.startsWith("picker:") ? "pk" : src === "override" ? "ovr" : src === "manual" ? "man" : ""; h += `<td class="${cls}">${esc(fmtNum(m, v))}</td>`; }
       if (isFri(d)) h += `<td class="gap"></td>`;
     }
     h += `</tr>`;

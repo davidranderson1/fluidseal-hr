@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fluidseal HR — My Day</title>
+<meta name="description" content="Fluidseal AB HR portal — My Day. Each picker types what they did today (orders, transfers, assemblies, machining) and an end-of-day note; it fills their line of the Ship Register. Sign-in required.">
+<style>
+  :root{--black:#231F20;--yellow:#FFDD00;--paper:#f4f4f5;--card:#fff;--line:#e4e4e7;--ink:#231F20;--muted:#6b6b70;--soft:#fafafa;--good:#1a7f4b;--warn:#b8860b;--bad:#c8222a;--blue:#2563a8;}
+  :root[data-theme="dark"]{--paper:#161617;--card:#232326;--line:#37373b;--ink:#f4f4f5;--muted:#a1a1aa;--soft:#1c1c1e;--good:#4ade80;--warn:#fbbf24;--bad:#f87171;--blue:#60a5fa;}
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#161617;--card:#232326;--line:#37373b;--ink:#f4f4f5;--muted:#a1a1aa;--soft:#1c1c1e;--good:#4ade80;--warn:#fbbf24;--bad:#f87171;--blue:#60a5fa;}}
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;line-height:1.5;-webkit-font-smoothing:antialiased;}
+  header.top{background:var(--black);border-bottom:4px solid var(--yellow);padding:14px 16px;}
+  .top-wrap{max-width:980px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+  .wordmark{color:#fff;font-weight:800;letter-spacing:.5px;font-size:20px;}.wordmark b{color:var(--yellow);}
+  .top h1{color:#fff;font-size:13px;font-weight:400;margin:2px 0 0;opacity:.85;}
+  .who{color:#fff;font-size:12px;opacity:.8;}
+  .btn{background:var(--yellow);color:var(--black);border:none;border-radius:10px;padding:10px 16px;font-family:inherit;font-weight:800;font-size:14px;cursor:pointer;}
+  .btn:disabled{opacity:.5;cursor:default;}
+  .btn.ghost{background:transparent;border:1px solid rgba(255,255,255,.4);color:#fff;font-weight:600;padding:6px 12px;font-size:12px;}
+  .btn.line{background:transparent;border:1px solid var(--line);color:var(--ink);font-weight:700;}
+  main{max-width:980px;margin:0 auto;padding:16px;}
+  .login{max-width:420px;margin:8vh auto;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:26px;text-align:center;}
+  .login h2{margin:0 0 4px;font-size:20px;}.login p{color:var(--muted);font-size:13px;margin:0 0 18px;}
+  .login input{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--soft);color:var(--ink);font-family:inherit;font-size:15px;margin-bottom:10px;}
+  .login .btn{width:100%;}
+  .msg{font-size:13px;}.msg.err{color:var(--bad);}.msg.ok{color:var(--good);}
+  .lock{font-size:34px;}.hidden{display:none!important;}a{color:inherit;}
+  .loading{text-align:center;color:var(--muted);padding:40px;font-size:14px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px;}
+  h2.hi{font-size:24px;margin:4px 0 2px;}
+  .sub{font-size:12.5px;color:var(--muted);}
+  h3{font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin:0 0 10px;}
+  .days{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0 0;}
+  .chip{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer;color:var(--ink);font-family:inherit;}
+  .chip.active{background:var(--black);color:#fff;border-color:var(--black);}
+  :root[data-theme="dark"] .chip.active{background:#000;border-color:var(--yellow);}
+  input[type=date]{padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--soft);color:var(--ink);font-family:inherit;font-size:13px;}
+  .prio{display:flex;gap:8px;flex-wrap:wrap;}
+  .prio span{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:13.5px;font-weight:700;}
+  .prio b{display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;border-radius:50%;background:var(--yellow);color:var(--black);font-size:11px;margin-right:6px;}
+  .counters{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;}
+  .ctr{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;text-align:center;}
+  .ctr .lbl{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;}
+  .ctr .hint{font-size:11.5px;color:var(--muted);min-height:16px;}
+  .ctr .row{display:flex;align-items:center;justify-content:center;gap:10px;margin:10px 0 4px;}
+  .ctr button{width:54px;height:54px;border-radius:14px;border:1px solid var(--line);background:var(--soft);color:var(--ink);font-size:26px;font-weight:800;cursor:pointer;font-family:inherit;}
+  .ctr button.plus{background:var(--yellow);color:var(--black);border-color:var(--yellow);}
+  .ctr input{width:96px;font-size:36px;font-weight:900;text-align:center;border:1px solid var(--line);border-radius:12px;padding:4px;background:var(--soft);color:var(--ink);font-family:inherit;}
+  .ctr .vs{font-size:12px;color:var(--muted);}
+  .ctr .vs b.up{color:var(--good);}.ctr .vs b.dn{color:var(--warn);}
+  textarea{width:100%;min-height:90px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--soft);color:var(--ink);font-family:inherit;font-size:14px;resize:vertical;}
+  .bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px;}
+  .banner{background:color-mix(in srgb,var(--yellow) 14%,transparent);border-left:4px solid var(--yellow);border-radius:0 10px 10px 0;padding:10px 14px;font-size:13px;margin-bottom:14px;}
+  .done{background:color-mix(in srgb,var(--good) 14%,transparent);border-left-color:var(--good);}
+  .tbl{width:100%;border-collapse:collapse;font-size:13px;}
+  .tbl th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.3px;color:var(--muted);border-bottom:1px solid var(--line);padding:6px 8px;white-space:nowrap;}
+  .tbl td{border-bottom:1px solid var(--line);padding:7px 8px;vertical-align:top;}
+  .tbl .num{text-align:right;font-variant-numeric:tabular-nums;}
+  .tbl td:first-child{white-space:nowrap;}
+  .scroll{overflow-x:auto;}
+  footer{max-width:980px;margin:16px auto 40px;padding:0 16px;color:var(--muted);font-size:11px;}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-wrap">
+    <div><div class="wordmark">FLUIDSEAL<b> AB</b></div><h1>HR Portal &mdash; My Day</h1></div>
+    <div id="userbox"></div>
+  </div>
+</header>
+<div id="loginview">
+  <div class="login">
+    <div class="lock">📦</div>
+    <h2>My Day</h2>
+    <p>For the warehouse team: type what you did today and leave a note for the end of the day. Sign in with your Fluidseal email — we send you a one-time link. On your own PC you stay signed in.</p>
+    <input type="email" id="email" placeholder="you@sealsonline.com" autocomplete="email">
+    <button class="btn" id="sendlink">Email me a sign-in link</button>
+    <div class="msg" id="loginmsg" style="margin-top:12px"></div>
+  </div>
+</div>
+<div id="denyview" class="hidden">
+  <div class="login">
+    <div class="lock">⛔</div>
+    <h2 id="denytitle">Not switched on yet</h2>
+    <p id="denymsg"></p>
+    <div id="denyextra"></div>
+    <button class="btn line" id="signout2" style="margin-top:10px">Sign out</button>
+  </div>
+</div>
+<main id="appview" class="hidden"><div id="content"></div></main>
+<div id="loading" class="loading hidden">Loading…</div>
+<footer id="foot" class="hidden">My Day — your numbers fill your line of the nightly Ship Register; Cindy and management see them in the Daily View. Only you can change your own day (the last 7 days). — Fluidseal HR Portal</footer>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="myday.js"></script>
+</body>
+</html>
