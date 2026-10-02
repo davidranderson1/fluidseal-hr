@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fluidseal HR — Territory Scorecard</title>
+<meta name="description" content="Fluidseal AB HR portal — Territory Scorecard: next best action, account coverage, quotes, Mining, cases and orders for each territory manager. Sign-in required.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Montserrat:wght@500;600;700;800&display=swap">
+<style>
+/* Layout: black-bar house chrome; a sticky person + territory switch; next best action first, then the scorecard, then detail sections. */
+:root{
+  --bar:#231F20; --yellow:#FFDD00;
+  --paper:#f6f6f3; --surface:#ffffff; --fg:#231F20; --fg2:#4d4a47; --muted:#7a7772; --line:#dedcd6; --line2:#ecebe6; --wash:#f1f0ec;
+  --s1:#2a78d6; --s2:#eb6834;
+  --good:#0ca30c; --warn:#fab219; --crit:#d03b3b; --good-ink:#006300; --crit-ink:#b42d2d; --warn-ink:#8a5a00;
+  --band:rgba(35,31,32,.06); --sel-bg:#231F20; --sel-fg:#ffffff;
+  --f-display:'Anton','Impact','Arial Narrow Bold',sans-serif;
+  --f-label:'Montserrat','Century Gothic',Arial,sans-serif;
+  --f-body:'Helvetica Neue',Helvetica,Arial,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#141213; --surface:#1d1b1c; --fg:#f2f1ed; --fg2:#cfccc6; --muted:#a19e98; --line:#3a3634; --line2:#2a2726; --wash:#252223;
+  --s1:#3987e5; --s2:#d95926; --good-ink:#3fc23f; --crit-ink:#ee6b6b; --warn-ink:#f5c04a; --band:rgba(255,255,255,.06); --sel-bg:#f2f1ed; --sel-fg:#141213; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --paper:#141213; --surface:#1d1b1c; --fg:#f2f1ed; --fg2:#cfccc6; --muted:#a19e98; --line:#3a3634; --line2:#2a2726; --wash:#252223;
+  --s1:#3987e5; --s2:#d95926; --good-ink:#3fc23f; --crit-ink:#ee6b6b; --warn-ink:#f5c04a; --band:rgba(255,255,255,.06); --sel-bg:#f2f1ed; --sel-fg:#141213; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--fg);font:15px/1.5 var(--f-body);margin:0}
+a{color:inherit;text-decoration-color:var(--muted);text-underline-offset:2px}
+:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+.top{background:var(--bar);color:#fff;border-bottom:4px solid var(--yellow)}
+.wrap{max-width:1280px;margin:0 auto;padding-inline:20px}
+.top .wrap{padding-block:20px 16px;display:flex;flex-wrap:wrap;gap:8px 28px;align-items:flex-end;justify-content:space-between}
+h1{font:400 clamp(28px,5vw,44px)/1 var(--f-display);text-transform:uppercase;margin:0}
+.top .sub{font:500 13px/1.4 var(--f-label);color:#c6c8ca}
+.top .sub b{color:var(--yellow);font-weight:600}
+nav.sticky{position:sticky;top:env(safe-area-inset-top,0px);z-index:6;background:var(--surface);border-bottom:1px solid var(--line);box-shadow:0 2px 6px rgba(0,0,0,.04)}
+nav.sticky .wrap{display:grid;gap:6px;padding-block:8px}
+.row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.lbl{font:700 11px/1 var(--f-label);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-right:4px}
+.chipbtn{font:600 12.5px/1 var(--f-label);border:1px solid var(--line);background:var(--surface);color:var(--fg2);padding:7px 11px;border-radius:999px;cursor:pointer;white-space:nowrap}
+.chipbtn[aria-pressed="true"]{background:var(--sel-bg);border-color:var(--sel-bg);color:var(--sel-fg)}
+.chipbtn.sub[aria-pressed="true"]{background:var(--yellow);border-color:var(--yellow);color:#231F20}
+.links{display:flex;flex-wrap:wrap;gap:2px 14px;font:600 11.5px/1.6 var(--f-label);letter-spacing:.04em;text-transform:uppercase}
+.links a{text-decoration:none;color:var(--fg2)}
+main .wrap{padding-block:22px 60px;display:grid;gap:34px}
+section{display:grid;gap:12px;min-width:0;scroll-margin-top:110px}
+h2{font:400 25px/1.1 var(--f-display);text-transform:uppercase;margin:0;text-wrap:balance}
+h2 small{font:600 12px/1 var(--f-label);letter-spacing:.06em;color:var(--muted);margin-left:10px;vertical-align:4px}
+h3{font:700 12.5px/1.3 var(--f-label);letter-spacing:.05em;text-transform:uppercase;margin:0;color:var(--fg2)}
+p{margin:0;max-width:80ch}
+.lede{color:var(--fg2)}
+.note{color:var(--muted);font-size:12.5px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:14px;min-width:0}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr));gap:14px}
+.who{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:baseline}
+.who .nm{font:400 26px/1 var(--f-display);text-transform:uppercase}
+.who .tt{font:600 12px/1.3 var(--f-label);color:var(--muted)}
+/* action buttons */
+.actions{display:grid;grid-template-columns:repeat(auto-fill,minmax(178px,1fr));gap:8px}
+.abtn{display:flex;flex-direction:column;justify-content:flex-start;gap:2px;text-align:left;font:inherit;border:1px solid var(--line);border-left:4px solid var(--line);background:var(--surface);border-radius:5px;padding:9px 11px;cursor:pointer;color:var(--fg)}
+.abtn>span{display:block}
+.abtn .c{font:700 20px/1.1 var(--f-body);font-variant-numeric:tabular-nums}
+.abtn .l{font:700 11.5px/1.25 var(--f-label);letter-spacing:.03em;text-transform:uppercase;color:var(--fg2)}
+.abtn .s{font-size:11.5px;line-height:1.35;color:var(--muted)}
+.abtn.crit{border-left-color:var(--crit)} .abtn.warn{border-left-color:var(--warn)} .abtn.good{border-left-color:var(--good)}
+.abtn[aria-pressed="true"]{outline:2px solid var(--fg);outline-offset:-1px;background:var(--wash)}
+.grp{font:700 11px/1 var(--f-label);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);grid-column:1/-1;margin-top:4px}
+/* pills */
+.pill{display:inline-flex;align-items:center;gap:5px;font:700 10.5px/1 var(--f-label);letter-spacing:.03em;text-transform:uppercase;padding:4px 7px;border-radius:4px;white-space:nowrap;border:1px solid var(--line);color:var(--fg2);background:var(--wash)}
+.pill i{width:8px;height:8px;border-radius:2px;display:inline-block}
+.pill.good{color:var(--good-ink)} .pill.good i{background:var(--good)}
+.pill.warn{color:var(--warn-ink)} .pill.warn i{background:var(--warn);transform:rotate(45deg)}
+.pill.crit{color:var(--crit-ink)} .pill.crit i{background:var(--crit);border-radius:50%}
+.pill.info i{background:var(--muted);height:2px}
+.tag{font:600 10px/1 var(--f-label);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);border:1px dashed var(--muted);border-radius:3px;padding:3px 5px;white-space:nowrap}
+/* tables */
+.tbl-wrap{overflow:auto;min-width:0;border:1px solid var(--line);border-radius:6px;background:var(--surface);max-height:640px}
+.tbl-wrap.free{max-height:none}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:7px 9px;border-bottom:1px solid var(--line2);text-align:left;vertical-align:top}
+thead th{font:700 10.5px/1.3 var(--f-label);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);background:var(--wash);position:sticky;top:0;z-index:2}
+thead tr.f th{top:30px;padding:4px 6px;background:var(--wash);z-index:2}
+thead th.sort{cursor:pointer;user-select:none;white-space:nowrap}
+thead th.sort:hover{color:var(--fg)}
+thead th .ar{font-size:10px;margin-left:3px}
+thead input,thead select{width:100%;min-width:70px;font:12px var(--f-body);padding:4px 5px;border:1px solid var(--line);border-radius:4px;background:var(--surface);color:var(--fg)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dt,.nw{white-space:nowrap}
+tr.pillar td{background:var(--bar);color:#fff;font:400 14px/1.2 var(--f-display);letter-spacing:.03em;text-transform:uppercase;padding-block:6px}
+tr.pillar td span{color:var(--yellow)}
+.kv .v{font:700 16px/1.1 var(--f-body);font-variant-numeric:tabular-nums}
+.kv .s{font-size:12px;color:var(--fg2)}
+.why{font-size:12px;color:var(--muted);margin-top:3px}
+.neg{color:var(--crit-ink)} .pos{color:var(--good-ink)}
+.over{color:var(--crit-ink);font-weight:600}
+.actcell{font-size:12.5px;min-width:230px}
+.more{display:flex;gap:10px;align-items:center;padding:8px 2px}
+.more button{font:600 12px var(--f-label);border:1px solid var(--line);background:var(--surface);color:var(--fg2);border-radius:4px;padding:6px 10px;cursor:pointer}
+.chip{font:600 11px/1 var(--f-label);padding:3px 6px;border-radius:3px;background:var(--wash);border:1px solid var(--line);white-space:nowrap}
+/* charts */
+.chart{position:relative;min-width:0}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font:600 12px/1.4 var(--f-label);color:var(--fg2)}
+.legend .sw{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:3px}
+.legend .tick{display:inline-block;width:14px;border-top:2px solid var(--fg);margin-right:6px;vertical-align:3px}
+.legend .bandsw{display:inline-block;width:14px;height:10px;background:var(--band);border:1px solid var(--line);margin-right:6px;vertical-align:-1px}
+.tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--line);box-shadow:0 4px 14px rgba(0,0,0,.12);border-radius:5px;padding:8px 10px;font-size:12.5px;min-width:140px;z-index:3}
+.tip .h{font:700 11px/1.3 var(--f-label);letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+.tile{border:1px solid var(--line);border-radius:6px;padding:9px 11px;background:var(--surface)}
+.tile .l{font:600 11px/1.3 var(--f-label);letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.tile .n{font:700 19px/1.2 var(--f-body);font-variant-numeric:tabular-nums}
+.tile .s{font-size:12px;color:var(--fg2)}
+ol.steps{margin:0;padding-left:20px;display:grid;gap:4px}
+@media (max-width:560px){h2{font-size:21px}.actions{grid-template-columns:1fr 1fr}}
+
+[hidden]{display:none!important}
+.wordmark{font:800 13px/1 var(--f-label);letter-spacing:.14em;color:#fff;margin-bottom:6px}.wordmark b{color:var(--yellow)}
+.gate{display:flex;justify-content:center;padding:48px 16px}
+.login{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:26px 24px;max-width:420px;width:100%;display:grid;gap:12px;text-align:center}
+.login .lock{font-size:30px}.login h2{font-size:24px}
+.login input{font:15px var(--f-body);padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--fg);width:100%}
+.gbtn{font:700 14px var(--f-label);background:var(--yellow);color:#231F20;border:0;border-radius:6px;padding:11px 14px;cursor:pointer}
+.gbtn.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+.msg{font-size:13px;color:var(--muted);min-height:18px}.msg.err{color:var(--crit-ink)}.msg.ok{color:var(--good-ink)}
+.top .who{font:600 12px var(--f-label);color:#c6c8ca}.top .so{font:600 12px var(--f-label);background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:20px;padding:5px 12px;cursor:pointer;margin-left:8px}
+.foot{border-top:1px solid var(--line);padding:14px 0 30px}
+</style>
+</head>
+<body>
+<div class="top"><div class="wrap">
+  <div><div class="wordmark">FLUIDSEAL<b> AB</b></div><h1>Territory Scorecard</h1>
+  <div class="sub">HR Portal · centred on the account · <b id="asof"></b></div></div>
+  <div class="sub" id="userbox"></div>
+</div></div>
+<div id="loginview" class="gate"><div class="login">
+  <div class="lock">🔒</div><h2>Territory Scorecard</h2>
+  <p>Internal · territory managers and management. Sign in with your Fluidseal email and we'll send you a one-time link.</p>
+  <input type="email" id="email" placeholder="you@sealsonline.com" autocomplete="email">
+  <button class="gbtn" id="sendlink">Email me a sign-in link</button>
+  <div class="msg" id="loginmsg"></div>
+</div></div>
+<div id="denyview" class="gate" hidden><div class="login">
+  <div class="lock">⛔</div><h2 id="denytitle">No access</h2><p id="denymsg"></p>
+  <button class="gbtn ghost" id="signout2">Sign out</button>
+</div></div>
+<div id="loading" class="gate" hidden><div class="login"><p>Loading your territories…</p></div></div>
+<div id="appview" hidden>
+<nav class="sticky" aria-label="Dashboard controls"><div class="wrap">
+  <div class="row" role="group" aria-label="Dashboard"><span class="lbl">Dashboard</span><span id="people" class="row"></span></div>
+  <div class="row" role="group" aria-label="Territory"><span class="lbl">Territory</span><span id="terrs" class="row"></span></div>
+  <div class="links"><a href="index.html">&larr; HR Portal</a><a href="#nba">Next best action</a><a href="#scorecard">Scorecard</a><a href="#tiers">Accounts</a><a href="#activity">Activity</a><a href="#orders">Orders</a><a href="#time">Time</a><a href="#method">Method</a></div>
+</div></nav>
+
+<main><div class="wrap">
+
+<section id="nba">
+  <div class="who"><span class="nm" id="whoname"></span><span class="tt" id="whotext"></span></div>
+  <h2>Next best action</h2>
+  <p class="lede">Pick a button to load that work list below. Each row says what to do next; click a column title to sort and use the boxes under the titles to filter. Largest money at stake comes first.</p>
+  <div class="actions" id="abtns"></div>
+  <div class="panel" style="display:grid;gap:8px">
+    <div class="row" style="justify-content:space-between"><h3 id="ttitle"></h3><span class="row"><span class="note" id="tcount"></span><button id="expbtn" class="chipbtn" hidden>Export list (CSV)</button><span class="note" id="expnote"></span></span></div>
+    <div class="tbl-wrap" id="twrap"><table id="atable"></table></div>
+    <div class="more" id="tmore"></div>
+  </div>
+</section>
+
+<section id="scorecard">
+  <h2>Scorecard <small>proposed targets</small></h2><div class="row" id="adminrow" hidden><button class="chipbtn" id="refreshbtn">Refresh data now</button><span class="note" id="refreshnote"></span></div>
+  <p class="lede">Measures for the selected dashboard and territory. Status: <span class="pill good"><i></i>On target</span> <span class="pill warn"><i></i>Close</span> <span class="pill crit"><i></i>Needs action</span> <span class="pill info"><i></i>Context</span>. <span class="tag">Capture</span> marks red that is mostly work never logged in Dynamics.</p>
+  <div class="tbl-wrap free"><table id="kpi"></table></div>
+</section>
+
+<section id="tiers">
+  <h2>Accounts by tier</h2>
+  <p class="lede">Tiers are set inside each territory from the last 12 months of sales: A the top 20% of buying accounts, B the next 30%, C the other buyers, $0 no sales. A visit is an appointment or completed call linked or matched to the account, by anyone.</p>
+  <div class="tbl-wrap free"><table id="tiertbl"></table></div>
+</section>
+
+<section id="activity">
+  <h2>Activity</h2>
+  <p class="lede" id="actlede"></p>
+  <div class="panel" style="display:grid;gap:10px"><div class="legend" id="apleg"></div><div class="chart" id="apchart"></div></div>
+  <div class="tbl-wrap free"><table id="acttbl"></table></div>
+</section>
+
+<section id="orders">
+  <h2>Orders</h2>
+  <p class="lede">Daily, weekly and monthly totals from the Order table (P21 order value before GST, duplicates removed) for accounts in the selected territories. Financial Lines are the invoiced months loaded at month end.</p>
+  <div class="tiles" id="ordtiles"></div>
+  <div class="panel" style="display:grid;gap:10px"><h3 id="ordtitle">Orders in Dynamics against invoiced sales</h3><div class="legend" id="ordleg"></div><div class="chart" id="ordchart"></div></div>
+  <div class="tbl-wrap free"><table id="recon"></table></div>
+</section>
+
+<section id="time">
+  <h2>Time tracking</h2>
+  <p class="lede">Read relative to the team, not as a score. Some people log exceptions only (late, absent, vacation), not daily sign-in and sign-out, so their day lengths cannot be compared.</p>
+  <div class="tbl-wrap free"><table id="ttbl"></table></div>
+</section>
+
+
+<section id="method">
+  <h2>Method</h2>
+  <div class="grid2">
+    <div class="panel" style="display:grid;gap:8px"><h3>How it is counted</h3><ol class="steps" style="list-style:disc">
+      <li>Dashboards follow the territory owner on the Dynamics user record (Sales Manager - P21). The buttons under each name list the territories that dashboard covers.</li>
+      <li>An account's territory is the P21 rep number carrying most of its Financial Lines sales; accounts with no sales use the number in their customer code (Calgary 604 and 610 codes count as 704 and 710).</li>
+      <li>Sales come from Financial Lines by P21 rep number (fiscal year November to October, through the last month loaded, against the same months last year). Orders, quotes, Mining and cases reach a territory through the account.</li>
+      <li>Quotes "brought in" are quotes where the person is Manager. A Mining opportunity becomes the quote's opportunity when inside sales converts it (its type changes from Mining to Quote or Order), so "opportunities opened" counts everything the person created and "converted" counts those now a quote or order. Open Mining and activity follow the record owner. In the work lists, the person's own quotes, Mining and cases join in on their full view; a single territory button shows that territory's accounts only. Activity, Mining opened and quotes brought in on the scorecard are measures of the person and do not change with the territory buttons.</li>
+      <li>Visits use appointments (customer name in the subject matched when Regarding is empty) and completed phone calls by anyone. Follow-up logged = an email the Manager sent from Dynamics on the quote (outside sales only).</li>
+      <li>Order values are reliable from January 2026; values that are really an order or quote number are ignored.</li>
+    </ol></div>
+    <div class="panel" style="display:grid;gap:8px"><h3>Sources</h3><ol class="steps" style="list-style:disc">
+      <li>Dynamics 365 (fluidseal.crm.dynamics.com), read every morning before 6:30 AM MT by the HR portal (read only): account, appointment, phone call, email, opportunity, quote, order, case, Financial Lines, time tracking, user. Who sees which territories comes from the Territory Manager field on the Dynamics user (until that field is filled in, from the HR portal's access list).</li>
+      <li>Benchmarks: Distribution Strategy Group, Industrial Distribution, Modern Distribution Management, Ebsta x Pavilion 2024, RAIN Group, Map My Customers. Consultant and vendor figures are rules of thumb.</li>
+      <li>Export: the "Export list (CSV)" button appears only for the portal administrator and saves the work list as filtered and sorted. Everyone else sees only their own territories; time tracking shows only your own record.</li>
+    </ol></div>
+  </div>
+</section>
+
+</div></main>
+</div>
+<footer class="foot" id="foot" hidden><div class="wrap note" id="footnote"></div></footer>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="territory.js"></script>
+</body>
+</html>
