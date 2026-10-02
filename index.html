@@ -131,6 +131,15 @@
   .fbform input,.fbform textarea{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--soft);color:var(--ink);font-family:inherit;font-size:13.5px;margin-bottom:10px;}
   .fbform textarea{min-height:96px;resize:vertical;line-height:1.5;}
   .fbform .btn{width:100%;padding:11px;}
+  .fbtoolbar{display:flex;gap:6px;align-items:center;margin-bottom:6px;}
+  .fbtb{background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:5px 9px;font-family:inherit;font-weight:800;font-size:12px;color:var(--ink);cursor:pointer;}
+  .fbtb:hover{border-color:var(--yellow);}
+  .fbtbhint{font-size:11px;color:var(--muted);margin-left:auto;}
+  .fbeditor{width:100%;min-height:180px;max-height:46vh;overflow-y:auto;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--soft);color:var(--ink);font-family:inherit;font-size:13.5px;line-height:1.55;margin-bottom:10px;}
+  .fbeditor:focus{outline:none;border-color:var(--yellow);}
+  .fbeditor:empty:before{content:attr(data-ph);color:var(--muted);}
+  .fbeditor ul,.fbeditor ol{margin:6px 0;padding-left:22px;}
+  .fbeditor li{margin:2px 0;}
   .fbsectlabel{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:800;margin:20px 0 10px;border-top:1px solid var(--line);padding-top:16px;}
   .fbitem{border-left:3px solid var(--yellow);padding:1px 0 12px 12px;margin-bottom:12px;}
   .fbitem .m{font-size:11px;color:var(--muted);font-weight:700;display:flex;align-items:center;flex-wrap:wrap;}
@@ -145,7 +154,7 @@
 <header class="top">
   <div class="top-wrap">
     <div><div class="wordmark">FLUIDSEAL<b> AB</b></div><h1>HR Portal &mdash; team performance &amp; reviews</h1></div>
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;"><a href="feedback.html" style="color:#fff;font-size:12.5px;font-weight:700;text-decoration:none;border:1px solid rgba(255,255,255,.4);border-radius:20px;padding:5px 12px;">💡 Feature Review</a><a href="service.html" style="color:#fff;font-size:12.5px;font-weight:700;text-decoration:none;border:1px solid rgba(255,255,255,.4);border-radius:20px;padding:5px 12px;">⭐ Service Score</a><a href="register.html" style="color:#fff;font-size:12.5px;font-weight:700;text-decoration:none;border:1px solid rgba(255,255,255,.4);border-radius:20px;padding:5px 12px;">📋 Ship Register</a><div id="userbox"></div></div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;"><a href="feedback.html" style="color:#fff;font-size:12.5px;font-weight:700;text-decoration:none;border:1px solid rgba(255,255,255,.4);border-radius:20px;padding:5px 12px;">💡 Feature Review</a><div id="userbox"></div></div>
   </div>
 </header>
 
@@ -185,7 +194,12 @@
   <div class="fbbody">
     <form class="fbform" id="fbform" onsubmit="return false">
       <input type="text" id="fbtopic" placeholder="Topic (optional) — e.g. Great customer save" maxlength="90">
-      <textarea id="fbtext" placeholder="Write feedback for this employee…"></textarea>
+      <div class="fbtoolbar">
+        <button type="button" class="fbtb" data-cmd="insertUnorderedList" title="Bulleted list">• List</button>
+        <button type="button" class="fbtb" data-cmd="insertOrderedList" title="Numbered list">1. List</button>
+        <span class="fbtbhint">Enter = new line</span>
+      </div>
+      <div id="fbtext" class="fbeditor" contenteditable="true" role="textbox" aria-multiline="true" data-ph="Write feedback for this employee…"></div>
       <button class="btn" id="fbsubmit">Save feedback</button>
       <div class="msg" id="fbmsg"></div>
     </form>

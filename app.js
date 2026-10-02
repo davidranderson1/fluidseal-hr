@@ -209,12 +209,27 @@ function openDetail(k){
 let FB_EMP=null;
 function fbEsc(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function fbStat(s){ return s==='created'?'in Dynamics':(s==='failed'?'sync pending':'saving…'); }
+// turn the rich editor's HTML into clean plain text: real line breaks, "• " / "1." list markers
+function fbChildText(node){ return [...node.childNodes].map(fbNodeText).join(''); }
+function fbNodeText(node){
+  if(node.nodeType===3) return node.nodeValue.replace(/ /g,' ');
+  if(node.nodeType!==1) return '';
+  const tag=node.tagName.toLowerCase();
+  if(tag==='br') return '\n';
+  if(tag==='ul'||tag==='ol'){
+    const items=[...node.children].filter(c=>c.tagName.toLowerCase()==='li');
+    return '\n'+items.map((li,i)=>(tag==='ul'?'• ':(i+1)+'. ')+fbChildText(li).replace(/\s*\n\s*/g,' ').trim()).join('\n')+'\n';
+  }
+  if(tag==='div'||tag==='p') return fbChildText(node)+'\n';
+  return fbChildText(node);
+}
+function fbEditorText(root){ return fbChildText(root).replace(/\n{3,}/g,'\n\n').replace(/[ \t]+\n/g,'\n').replace(/^\s+|\s+$/g,''); }
 async function openFeedback(id,name){
   if(!id) return;
   FB_EMP=id;
   $('#fbtitle').textContent=name||'Feedback';
   $('#fbsub').textContent='Saved to this employee’s Dynamics notepad (reason: Feedback).';
-  $('#fbtopic').value=''; $('#fbtext').value=''; $('#fbmsg').textContent=''; $('#fbmsg').className='msg';
+  $('#fbtopic').value=''; $('#fbtext').innerHTML=''; $('#fbmsg').textContent=''; $('#fbmsg').className='msg';
   $('#fblist').innerHTML='<div class="empty">Loading…</div>';
   $('#fbmodal').classList.remove('hidden');
   await loadFeedback(id);
@@ -233,7 +248,7 @@ $('#fbclose').onclick=closeFeedback;
 $('#fbmodal').onclick=(ev)=>{ if(ev.target.id==='fbmodal') closeFeedback(); };
 $('#fbsubmit').onclick=async ()=>{
   if(!FB_EMP) return;
-  const body=$('#fbtext').value.trim(), topic=$('#fbtopic').value.trim(), msg=$('#fbmsg');
+  const body=fbEditorText($('#fbtext')), topic=$('#fbtopic').value.trim(), msg=$('#fbmsg');
   if(!body){ msg.className='msg err'; msg.textContent='Write some feedback first.'; return; }
   $('#fbsubmit').disabled=true; msg.className='msg'; msg.textContent='Saving…';
   let res; try{ res=await sb.functions.invoke('hr-feedback',{ body:{ employee_id:FB_EMP, topic, body } }); }catch(e){ res={ error:e }; }
@@ -242,11 +257,15 @@ $('#fbsubmit').onclick=async ()=>{
   if((res&&res.error) || !d || (d.ok===false && !d.saved)){ msg.className='msg err'; msg.textContent='Could not save — please try again.'; return; }
   if(d.ok===false && d.saved){ msg.className='msg ok'; msg.textContent='Saved ✓ — Dynamics sync is pending; it will appear on the notepad shortly.'; }
   else { msg.className='msg ok'; msg.textContent='Saved to the notepad ✓'; }
-  $('#fbtopic').value=''; $('#fbtext').value='';
+  $('#fbtopic').value=''; $('#fbtext').innerHTML='';
   if(DATA&&DATA.fbCounts){ DATA.fbCounts[FB_EMP]=(DATA.fbCounts[FB_EMP]||0)+1;
     document.querySelectorAll(`.fbbtn[data-fb="${FB_EMP}"]`).forEach(b=>{ b.innerHTML=`💬 Feedback<span class="cnt">${DATA.fbCounts[FB_EMP]}</span>`; }); }
   await loadFeedback(FB_EMP);
 };
+document.querySelectorAll('.fbtb').forEach(btn=>{
+  btn.addEventListener('mousedown',(ev)=>ev.preventDefault());
+  btn.addEventListener('click',(ev)=>{ ev.preventDefault(); $('#fbtext').focus(); try{ document.execCommand(btn.dataset.cmd,false,null); }catch(e){} });
+});
 
 $('#foot').innerHTML=`Live from Dynamics 365 via a gated Supabase layer (HR-only). Employee, team and directory data refresh nightly; the Ship Register is loaded monthly. Access is limited to the HR allow-list. Picking accuracy normalizes NVA errors against handling volume. Name mapping notes: register "Suzie" → Elrica Barrett and the single "Kevin" picker → Kevin Blair are unconfirmed; CINDY/MERRYL share order code 675. — Fluidseal HR Portal`;
 boot();
