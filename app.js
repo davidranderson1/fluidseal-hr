@@ -61,8 +61,8 @@ function tenure(startISO){
 }
 async function loadAndRender(){
   show('loading');
-  const [emp, periods, teamMembers, counts, revIdx] = await Promise.all([
-    sb.rpc('hr_employee_list'), sb.rpc('hr_register_periods'), sb.rpc('hr_team_member_list'), sb.rpc('hr_feedback_counts'), sb.rpc('hr_review_index')
+  const [emp, periods, teamMembers, counts, revIdx, syncSt] = await Promise.all([
+    sb.rpc('hr_employee_list'), sb.rpc('hr_register_periods'), sb.rpc('hr_team_member_list'), sb.rpc('hr_feedback_counts'), sb.rpc('hr_review_index'), sb.rpc('hr_sync_status')
   ]);
   REV_IDX={}; (revIdx.data||[]).forEach(r=>{ if(r.employee_id) REV_IDX[r.employee_id]=r; });
   const fbCounts={}; (counts.data||[]).forEach(r=>{ if(r.employee_id) fbCounts[r.employee_id]=Number(r.n); });
@@ -85,7 +85,7 @@ async function loadAndRender(){
       key: e.last_name.replace(/\s+/g,''),
       id: e.employee_id,
       first: e.first_name, last: e.last_name, title: e.title||'—',
-      dept: e.department || e.department_text || 'Unassigned',
+      dept: e.department || e.department_text || 'Unassigned', departments: Array.isArray(e.departments)?e.departments:[],
       start: e.employee_start_date, end: e.employee_end_date,
       tenure: tenure(e.employee_start_date), p21: e.p21_user_role, email: e.work_email,
       status: e.status, reason: e.status_reason,
@@ -99,6 +99,7 @@ async function loadAndRender(){
     active: active.map(norm), departed: departed.map(norm),
     period, teamMembers: teamMembers.data||[], fbCounts,
     syncedAt: employees.reduce((mx,e)=> e.synced_at>mx?e.synced_at:mx, ''),
+    syncStatus: (syncSt&&!syncSt.error&&syncSt.data)||null,
   };
   show('app'); renderRoster();
 }
@@ -118,19 +119,39 @@ function fmtReg(r){
 }
 function fmtDate(d){ const x=parseD(d); return x? x.toLocaleDateString('en-CA',{year:'numeric',month:'short',day:'numeric'}) : '—'; }
 function fmtShort(d){ const x=parseD(d); return x? x.toLocaleDateString('en-CA',{month:'short',day:'numeric'}) : ''; }
+function fmtTs(ts){ if(!ts) return '—'; const d=new Date(ts); return isNaN(d)? '—' : d.toLocaleString('en-CA',{timeZone:'America/Edmonton',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'})+' MT'; }
+function otherDepts(e){ return (e.departments||[]).filter(x=>x&&x!==e.dept); }
+async function syncNow(){
+  const b=$('#syncnow'); if(!b||b.disabled) return;
+  b.disabled=true; b.textContent='⟳ Syncing… (about 5 seconds)';
+  let res; try{ res=await sb.functions.invoke('hr-review-sync',{body:{}}); }catch(err){ res={error:err}; }
+  const ok=res&&!res.error&&res.data&&res.data.ok;
+  if(!ok){
+    let msg=(res&&res.data&&res.data.error)||'';
+    try{ if(!msg&&res.error&&res.error.context&&res.error.context.json){ const j=await res.error.context.json(); msg=j&&j.error; } }catch(_){}
+    b.disabled=false; b.textContent='⟳ Sync now'; alertBar('Sync did not finish: '+(msg||'please try again in a minute.')); return;
+  }
+  await loadAndRender();
+  alertBar(`Synced from Dynamics — ${res.data.profiles_full} review profiles and ${res.data.employees} employees refreshed.`, true);
+}
+function alertBar(msg, good){ const el=$('#syncbar'); if(!el) return; const d=document.createElement('div'); d.style.cssText=`flex-basis:100%;margin-top:6px;font-weight:600;color:${good?'var(--good)':'var(--bad)'}`; d.textContent=msg; el.appendChild(d); }
 function card(e,gone){
   const badge = gone?`<span class="goneflag">${e.reason||'departed'}</span>`:(e.review?`<span class="duebadge">review ${fmtShort(e.reviewDate)}</span>`:'');
   const meta = gone? `${e.title} · left ${fmtDate(e.end)}` : `${e.title} · ${e.tenure} tenure`;
   const fbn=(DATA&&DATA.fbCounts&&DATA.fbCounts[e.id])||0;
   const fbbtn=`<button class="fbbtn" data-fb="${e.id}" data-nm="${e.first} ${e.last}">💬 Feedback${fbn?`<span class="cnt">${fbn}</span>`:''}</button>`;
   return `<div class="ecard ${gone?'gone':(e.review?'due':'')}" data-id="${e.id}">${badge}
-    <div class="nm">${e.first} ${e.last}</div><div class="rl">${e.dept}</div>
+    <div class="nm">${e.first} ${e.last}</div><div class="rl">${e.dept}${otherDepts(e).length?` <span style="opacity:.8">+ ${otherDepts(e).map(esc).join(', ')}</span>`:''}</div>
     <div class="meta">${meta}</div>${fmtReg(e.reg)}${fbbtn}</div>`;
 }
 function renderRoster(){
   const p=DATA.period||{};
-  $('#syncbar').innerHTML=`<span class="syncdot"></span><span>Live from Dynamics · employees synced nightly (last: <b>${DATA.syncedAt?new Date(DATA.syncedAt).toLocaleString('en-CA'):'—'}</b>) · <b>${DATA.active.length}</b> active${DATA.departed.length?` · ${DATA.departed.length} recently departed`:''}</span><span class="spacer"></span><button class="btn" id="refresh">↻ Refresh</button>`;
+  const st=DATA.syncStatus||{}, lf=st.last_full||null, lr=st.last_run||null;
+  const lastSync=lf?`<b>${fmtTs(lf.finished_at)}</b> (${lf.kind==='button'?'Sync now'+(lf.requested_by?' · '+esc(lf.requested_by):''):lf.kind==='monthly'?'monthly run':lf.kind==='manual'?'run by Claude':esc(lf.kind)})`:'<b>not yet</b>';
+  const lastErr=lr&&lr.status==='error'?` · <span style="color:var(--bad)">last sync failed ${fmtTs(lr.started_at)}</span>`:'';
+  $('#syncbar').innerHTML=`<span class="syncdot"></span><span>Live from Dynamics · roster synced nightly (last: <b>${DATA.syncedAt?fmtTs(DATA.syncedAt):'—'}</b>) · review profiles synced ${lastSync}${lastErr} · <b>${DATA.active.length}</b> active${DATA.departed.length?` · ${DATA.departed.length} recently departed`:''}</span><span class="spacer"></span><button class="btn" id="syncnow" title="Re-read Dynamics now: review dates, Departments, attendance, error log, Very Awesomes and training for every review profile (about 5 seconds). Runs by itself on the 1st of every month.">⟳ Sync now</button> <button class="btn" id="refresh">↻ Refresh</button>`;
   $('#refresh').onclick=loadAndRender;
+  $('#syncnow').onclick=syncNow;
   $('#kpis').innerHTML=[
     ['n',DATA.active.length,'Active employees'],
     ['n',(p.orders||0).toLocaleString(),'Orders shipped ('+(p.label||'')+')'],
@@ -205,6 +226,20 @@ function kpiBlock(k){
   const tbl=k.table?`<div style="overflow-x:auto;margin-top:10px"><table><thead><tr>${k.table.head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${k.table.rows.map(r=>`<tr>${r.map((c,i)=>i?`<td style="text-align:center"><b>${c}</b></td>`:`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`:'';
   return `<div class="card"><h3>${k.title}</h3><div class="metric-row">${(k.items||[]).map(i=>metric(i.n,i.l,i.cls)).join('')}</div>${k.insight?`<div class="reginsight" style="margin-top:12px">${k.insight}</div>`:''}${tbl}</div>`;
 }
+// Department averages for every department the person is in (Departments column, synced nightly), from the Ship Register's
+// per-picker totals (Masters receive "everyone"). Average per day = total lines ÷ days worked across that department's pickers.
+function deptAverages(e,rv,d){
+  if(!d||!Array.isArray(d.everyone)||!d.everyone.length||!DATA) return [];
+  const mine=(e.departments&&e.departments.length?e.departments:((rv&&rv.departments)||[])).filter(Boolean);
+  if(!mine.length) return [];
+  const staff=DATA.active.concat(DATA.departed||[]);
+  const deptsOf=(nm)=>{ const n=String(nm||'').toLowerCase(); const p=staff.find(x=>n.includes((x.first+' '+x.last).toLowerCase())); return p?(p.departments&&p.departments.length?p.departments:[p.dept]):[]; };
+  return mine.map(dn=>{
+    const ms=d.everyone.filter(w=>Number(w.days_worked)>0 && deptsOf(w.name).includes(dn));
+    const days=ms.reduce((a,w)=>a+Number(w.days_worked),0), tot=ms.reduce((a,w)=>a+Number(w.total),0);
+    return { name:dn, people:ms.length, avg: days? Math.round(tot/days*10)/10 : null };
+  }).filter(r=>r.people>0);
+}
 async function loadProd(e,rv){
   const el=document.getElementById('prodcard'); if(!el) return;
   const from=(rv.window&&rv.window.from)||'2025-10-01', to=isoToday();
@@ -215,8 +250,10 @@ async function loadProd(e,rv){
   const days=(d.days||[]).map(x=>(x.orders||0)+(x.transfers||0)+(x.assemblies||0)+(x.machining||0));
   const notes=(d.days||[]).filter(x=>x.note).slice(-8).reverse();
   const peers=d.peers||{}, dep=d.department||{};
+  const deptRows=deptAverages(e,rv,d);
   el.innerHTML=`<h3>Productivity — My Day and Ship Register (vs peers)</h3>
-    <div class="metric-row">${metric(d.me.total,'Lines since '+fmtShort(d.from||from),'')}${metric(d.me.per_day,'Per working day',peers.avg_per_day&&d.me.per_day>=peers.avg_per_day?'good':'warn')}${metric(peers.rank?`${peers.rank} / ${peers.people}`:'—','Rank among pickers','')}${metric(peers.avg_per_day||'—','Picker average / day','')}${metric(dep.avg_per_day||'—',(dep.name||'Department')+' average / day','')}</div>
+    <div class="metric-row">${metric(d.me.total,'Lines since '+fmtShort(d.from||from),'')}${metric(d.me.per_day,'Per working day',peers.avg_per_day&&d.me.per_day>=peers.avg_per_day?'good':'warn')}${metric(peers.rank?`${peers.rank} / ${peers.people}`:'—','Rank among pickers','')}${metric(peers.avg_per_day||'—','Picker average / day','')}${deptRows.length?'':metric(dep.avg_per_day||'—',(dep.name||'Department')+' average / day','')}</div>
+    ${deptRows.length?`<h3 style="margin-top:14px">Compared with every department ${esc(e.first)} is in</h3><table><thead><tr><th>Department</th><th>Pickers</th><th>Average / day</th><th>${esc(e.first)} / day</th></tr></thead><tbody>${deptRows.map(r=>`<tr><td>${esc(r.name)}</td><td style="text-align:center">${r.people}</td><td style="text-align:center"><b>${r.avg}</b></td><td style="text-align:center;color:${d.me.per_day>=r.avg?'var(--good)':'var(--warn)'}"><b>${d.me.per_day}</b></td></tr>`).join('')}</tbody></table>`:''}
     <div class="regbar" style="margin-top:10px"><div><div class="regsub">${d.me.days_worked} days worked · ${esc(d.person&&d.person.department||'')}</div></div>${spark(days,'var(--blue)')}</div>
     ${notes.length?`<h3 style="margin-top:14px">End-of-day notes</h3><table><tbody>${notes.map(x=>`<tr><td class="date">${fmtShort(x.day)}</td><td>${esc(x.note)}</td></tr>`).join('')}</tbody></table>`:''}
     <p class="notenote">Live from the Ship Register (svc). Lines from My Day where entered, otherwise from the register; the register starts Sep 2026.</p>`;
@@ -234,7 +271,7 @@ async function openDetail(id){
   if(e.end) html+=`<div class="departbanner"><b>${e.reason||'Departed'} — last day ${fmtDate(e.end)}.</b> Kept for records; no longer on the active roster.</div>`;
   if(rv){
     const nextRev=row.review_date?`${fmtDate(row.review_date)}${row.review_kind?' · '+esc(row.review_kind):''}`:'not set';
-    if(rv.draft) html+=`<div class="departbanner" style="border-color:var(--line)">Draft review profile prepared by Claude from Dynamics (${esc(rv.built||'')}; data ${fmtDate(rv.window&&rv.window.from)} – ${fmtDate(rv.window&&rv.window.to)}). Check each item in Dynamics before the meeting.</div>`;
+    if(rv.draft) html+=`<div class="departbanner" style="border-color:var(--line)">Draft review profile prepared by Claude from Dynamics (${esc(rv.built||'')}; data ${fmtDate(rv.window&&rv.window.from)} – ${fmtDate(rv.window&&rv.window.to)}).${rv.synced?` Attendance, error log, Very Awesomes, training, Departments and the review date re-synced from Dynamics ${fmtTs(rv.synced)}; the written assessment, insights and notes are as of ${esc(rv.built||'the build')}.`:''} Check each item in Dynamics before the meeting.</div>`;
     if(rv.flags&&rv.flags.length) html+=`<div class="departbanner"><b>Check before the review</b><ul style="margin:6px 0 0 18px;padding:0">${rv.flags.map(f=>`<li>${f}</li>`).join('')}</ul></div>`;
     html+=`<div class="card"><p class="empname">${esc(e.first)} ${esc(e.last)}</p><p class="emprole">${esc(e.title)} &middot; ${esc(e.dept)} &middot; <a href="mailto:${esc(e.email||'')}">${esc(e.email||'')}</a></p>
       ${rv.goal?`<div class="goal"><b>Role &amp; goal</b>${rv.goal}</div>`:''}
@@ -324,5 +361,5 @@ document.querySelectorAll('.fbtb').forEach(btn=>{
   btn.addEventListener('click',(ev)=>{ ev.preventDefault(); $('#fbtext').focus(); try{ document.execCommand(btn.dataset.cmd,false,null); }catch(e){} });
 });
 
-$('#foot').innerHTML=`Live from Dynamics 365 via a gated Supabase layer (HR-only). Employee, team and directory data refresh nightly; the Ship Register is loaded monthly; review profiles are prepared from Dynamics and served only to signed-in HR viewers. Access is limited to the HR allow-list. Picking accuracy normalizes NVA errors against handling volume. Name mapping notes: register "Suzie" → Elrica Barrett and the single "Kevin" picker → Kevin Blair are unconfirmed; CINDY/MERRYL share order code 675. — Fluidseal HR Portal`;
+$('#foot').innerHTML=`Live from Dynamics 365 via a gated Supabase layer (HR-only). Employee, team and directory data refresh nightly; the Ship Register is loaded monthly; review profiles are prepared from Dynamics, re-synced on the 1st of every month or with Sync now, and served only to signed-in HR viewers. Access is limited to the HR allow-list. Picking accuracy normalizes NVA errors against handling volume. Name mapping notes: register "Suzie" → Elrica Barrett and the single "Kevin" picker → Kevin Blair are unconfirmed; CINDY/MERRYL share order code 675. — Fluidseal HR Portal`;
 boot();
