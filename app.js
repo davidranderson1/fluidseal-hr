@@ -112,7 +112,7 @@ function card(e,gone){
   const meta = gone? `${e.title} · left ${fmtDate(e.end)}` : `${e.title} · ${e.tenure} tenure`;
   const fbn=(DATA&&DATA.fbCounts&&DATA.fbCounts[e.id])||0;
   const fbbtn=`<button class="fbbtn" data-fb="${e.id}" data-nm="${e.first} ${e.last}">💬 Feedback${fbn?`<span class="cnt">${fbn}</span>`:''}</button>`;
-  return `<div class="ecard ${gone?'gone':(e.review?'due':'')}" data-k="${e.key}">${badge}
+  return `<div class="ecard ${gone?'gone':(e.review?'due':'')}" data-id="${e.id}">${badge}
     <div class="nm">${e.first} ${e.last}</div><div class="rl">${e.dept}</div>
     <div class="meta">${meta}</div>${fmtReg(e.reg)}${fbbtn}</div>`;
 }
@@ -146,11 +146,11 @@ function renderRoster(){
     html+=`<div class="deptgroup"><div class="deptname">${d} <span style="color:var(--muted);font-weight:600">${items.length}</span></div><div class="grid">`+items.map(e=>card(e,false)).join('')+`</div></div>`;
   });
   $('#roster').innerHTML=html||`<p class="empty">No employees match this filter.</p>`;
-  $('#roster').querySelectorAll('.ecard').forEach(c=>c.onclick=()=>openDetail(c.dataset.k));
+  $('#roster').querySelectorAll('.ecard').forEach(c=>c.onclick=()=>openDetail(c.dataset.id));
   const ds=$('#departsec');
   if(DATA.departed.length){
     ds.innerHTML=`<summary>Recently departed (${DATA.departed.length})</summary><div class="grid" style="margin-top:6px">`+DATA.departed.map(e=>card(e,true)).join('')+`</div>`;
-    ds.querySelectorAll('.ecard').forEach(c=>c.onclick=()=>openDetail(c.dataset.k));
+    ds.querySelectorAll('.ecard').forEach(c=>c.onclick=()=>openDetail(c.dataset.id));
   } else ds.innerHTML='';
   document.querySelectorAll('.fbbtn').forEach(b=>{ b.onclick=(ev)=>{ ev.stopPropagation(); openFeedback(b.dataset.fb, b.dataset.nm); }; });
   window.scrollTo(0,0);
@@ -176,8 +176,9 @@ function dailyTable(r){
   let cells=''; r.series.forEach((v)=>{cells+=`<td class="date" style="text-align:center"><b style="color:var(--ink);font-size:14px">${v==null?'—':v}</b></td>`;});
   return `<div style="overflow-x:auto"><table><tbody><tr>${cells}</tr></tbody></table></div>`;
 }
-function openDetail(k){
-  const e = DATA.active.find(x=>x.key===k) || DATA.departed.find(x=>x.key===k); if(!e) return;
+function openDetail(id){
+  const e = DATA.active.find(x=>x.id===id) || DATA.departed.find(x=>x.id===id); if(!e) return;
+  const k = e.key;
   const rv = REVIEWS[k] && (e.review || (e.reason)) ? REVIEWS[k] : null;
   const dv=$('#detailview'); let html=`<button class="backbtn" id="back">← Back to roster</button> <button class="backbtn" id="detailfb" style="background:var(--yellow);color:var(--black)">💬 Feedback</button>`;
   if(e.end) html+=`<div class="departbanner"><b>${e.reason||'Departed'} — last day ${fmtDate(e.end)}.</b> Kept for records; no longer on the active roster.</div>`;
