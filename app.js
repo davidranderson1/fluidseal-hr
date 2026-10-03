@@ -123,7 +123,7 @@ function fmtTs(ts){ if(!ts) return '—'; const d=new Date(ts); return isNaN(d)?
 function otherDepts(e){ return (e.departments||[]).filter(x=>x&&x!==e.dept); }
 async function syncNow(){
   const b=$('#syncnow'); if(!b||b.disabled) return;
-  b.disabled=true; b.textContent='⟳ Syncing… (about 5 seconds)';
+  b.disabled=true; b.textContent='⟳ Syncing… (about 10 seconds)';
   let res; try{ res=await sb.functions.invoke('hr-review-sync',{body:{}}); }catch(err){ res={error:err}; }
   const ok=res&&!res.error&&res.data&&res.data.ok;
   if(!ok){
@@ -149,7 +149,7 @@ function renderRoster(){
   const st=DATA.syncStatus||{}, lf=st.last_full||null, lr=st.last_run||null;
   const lastSync=lf?`<b>${fmtTs(lf.finished_at)}</b> (${lf.kind==='button'?'Sync now'+(lf.requested_by?' · '+esc(lf.requested_by):''):lf.kind==='monthly'?'monthly run':lf.kind==='manual'?'run by Claude':esc(lf.kind)})`:'<b>not yet</b>';
   const lastErr=lr&&lr.status==='error'?` · <span style="color:var(--bad)">last sync failed ${fmtTs(lr.started_at)}</span>`:'';
-  $('#syncbar').innerHTML=`<span class="syncdot"></span><span>Live from Dynamics · roster synced nightly (last: <b>${DATA.syncedAt?fmtTs(DATA.syncedAt):'—'}</b>) · review profiles synced ${lastSync}${lastErr} · <b>${DATA.active.length}</b> active${DATA.departed.length?` · ${DATA.departed.length} recently departed`:''}</span><span class="spacer"></span><button class="btn" id="syncnow" title="Re-read Dynamics now: review dates, Departments, attendance, error log, Very Awesomes and training for every review profile (about 5 seconds). Runs by itself on the 1st of every month.">⟳ Sync now</button> <button class="btn" id="refresh">↻ Refresh</button>`;
+  $('#syncbar').innerHTML=`<span class="syncdot"></span><span>Live from Dynamics · roster synced nightly (last: <b>${DATA.syncedAt?fmtTs(DATA.syncedAt):'—'}</b>) · review profiles synced ${lastSync}${lastErr} · <b>${DATA.active.length}</b> active${DATA.departed.length?` · ${DATA.departed.length} recently departed`:''}</span><span class="spacer"></span><button class="btn" id="syncnow" title="Re-read Dynamics now: review dates, Departments, attendance, error log, Very Awesomes, training, projects and campaigns for every review profile (about 10 seconds). Runs by itself on the 1st of every month.">⟳ Sync now</button> <button class="btn" id="refresh">↻ Refresh</button>`;
   $('#refresh').onclick=loadAndRender;
   $('#syncnow').onclick=syncNow;
   $('#kpis').innerHTML=[
@@ -258,6 +258,77 @@ async function loadProd(e,rv){
     ${notes.length?`<h3 style="margin-top:14px">End-of-day notes</h3><table><tbody>${notes.map(x=>`<tr><td class="date">${fmtShort(x.day)}</td><td>${esc(x.note)}</td></tr>`).join('')}</tbody></table>`:''}
     <p class="notenote">Live from the Ship Register (svc). Lines from My Day where entered, otherwise from the register; the register starts Sep 2026.</p>`;
 }
+// ---------- Projects and Campaigns layer (2026-10-03) ----------
+// Back office: Dynamics Projects (recurring work with the procedure in the Description). Outside sales: Campaigns, campaign
+// activities, marketing lists and the calls / visits tied to them. Built by the hr-review-sync edge function (projects.ts).
+(function(){ const s=document.createElement('style'); s.textContent=`.pjchip{display:inline-block;font-size:11px;font-weight:800;padding:2px 8px;border-radius:6px;white-space:nowrap}
+.pjchip.good{background:color-mix(in srgb,var(--good) 16%,transparent);color:var(--good)}.pjchip.warn{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)}.pjchip.bad{background:color-mix(in srgb,var(--bad) 15%,transparent);color:var(--bad)}.pjchip.na{background:var(--line);color:var(--muted)}
+.pjwrap{overflow-x:auto;margin-top:10px}.pjtbl td a{color:inherit;font-weight:600;text-decoration:none;border-bottom:1px dotted var(--muted)}.pjtbl td a:hover{color:var(--blue)}
+.pjhead{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.pjhead h3{margin:0}.pjgrade{font-size:13px;padding:3px 10px}
+.pjscore{font-size:12.5px;color:var(--muted);margin-top:6px}.pjbp{margin-top:12px;background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:13px}
+.pjbp summary,.pjmore summary{cursor:pointer;font-weight:700}.pjmore summary{font-size:12.5px;color:var(--muted);margin-top:8px}.pjbp ol{margin:8px 0 0 18px;padding:0}.pjbp li{margin:5px 0}`;
+  document.head.appendChild(s); })();
+const DYN='https://fluidseal.crm.dynamics.com/main.aspx?pagetype=entityrecord';
+function dynLink(etn,id,txt){ return `<a href="${DYN}&etn=${etn}&id=${encodeURIComponent(id||'')}" target="_blank" rel="noopener" title="Open in Dynamics">${txt}</a>`; }
+function pjChip(cls,t){ return `<span class="pjchip ${cls}">${t}</span>`; }
+function pjGradeHead(title,b){ return `<div class="pjhead"><h3>${title}</h3><span class="score pjgrade ${b.gcol||'na'}">${b.grade||'No grade yet'}</span></div>`; }
+function pjTable(head,rows,first){
+  const tbl=(rs)=>`<div class="pjwrap"><table class="pjtbl"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rs.join('')}</tbody></table></div>`;
+  if(rows.length<=first) return tbl(rows);
+  return tbl(rows.slice(0,first))+`<details class="pjmore"><summary>Show all ${rows.length}</summary>${tbl(rows.slice(first))}</details>`;
+}
+const BP_PROJECTS=`<details class="pjbp"><summary>Best practice — how a project is worked in Dynamics</summary><ol>
+<li><b>Start the day from My Projects</b>, sorted by Due Date: anything due today or earlier comes first.</li>
+<li><b>Follow the project's Description</b> — the written procedure lives there. If it is missing or out of date, update it (or ask your manager) so anyone covering can do the task.</li>
+<li><b>Log the work in a Note</b> when it is done: what was done, the date, your initials and the time it took (for example "sent ship register for Sept 29 · 09.30.26 · cc · 5–10 mins").</li>
+<li><b>Move the Due Date to the next occurrence</b> for its Frequency (Daily: next working day · Weekly: next week · Monthly: same day next month). Dynamics records the change as a "Record Updated" note — that is how completion and on-time are measured here.</li>
+<li><b>Running late?</b> Add a note with the reason before moving the date — never push a date without a note.</li>
+<li><b>Not yours, or no longer needed?</b> Ask your manager to reassign it, change its Frequency or close it (Status Reason Complete 100%, then Deactivate). A project should never sit overdue.</li></ol></details>`;
+const BP_CAMPAIGNS=`<details class="pjbp"><summary>Best practice — how a campaign is worked in Dynamics</summary><ol>
+<li><b>Campaign = the plan</b>: one per territory year or market push, with Proposed Start and End dates. When it ends, set it Completed — or set the new dates if it carries on.</li>
+<li><b>Marketing list = who</b>: build the account list (territory, market, zero-sales month, trip) and add it to the campaign.</li>
+<li><b>Campaign activity = what and when</b>: the call, visit or email with a due date. Distribute it to the list so every account gets its own phone call or appointment.</li>
+<li><b>Work every activity</b>: complete calls as Made or Received with the outcome in the note; reschedule with a reason; cancel only when the account does not apply.</li>
+<li><b>Turn results into business</b>: open the Mining or Quote opportunity and set the account's Next Touch.</li>
+<li><b>Review weekly</b>: open calls older than 30 days and campaign activities past due are cleared first.</li></ol></details>`;
+function projectsCard(b,e){
+  if(!b) return '';
+  const rows=(b.list||[]).map(r=>{
+    const st=r.inh?pjChip('na','handed over '+r.inh):(r.rec&&r.od>3?pjChip('bad',r.od>365?`${r.od} days behind · over a year`:`${r.od} days behind`):(r.od>0?pjChip('warn',`due ${r.od} day${r.od>1?'s':''} ago`):pjChip('good',r.rec?'on schedule':'open')));
+    return `<tr><td>${dynLink('new_project',r.id,r.n)}${r.bp?'':' '+pjChip('warn','no procedure')}</td><td>${r.f}</td><td class="date">${r.due?fmtDate(r.due):'—'}</td><td>${st}</td><td class="date">${r.last?fmtDate(r.last):'—'}</td><td style="text-align:center">${r.exp?`${r.c90} / ${r.exp}`:(r.c90||'—')}</td></tr>`;
+  });
+  const p=b.parts||{};
+  return `<div class="card" id="projcard">${pjGradeHead('Projects — managing assigned work',b)}
+    ${b.score!=null?`<div class="pjscore">Score ${b.score} / 100 — on schedule ${p.schedule}% · on time ${p.ontime}% · cadence ${p.cadence==null?'n/a':p.cadence+'%'} · work log ${p.log}%</div>`:`<div class="pjscore">Not graded: fewer than 3 recurring projects of their own and fewer than 20 completions in the last 90 days.</div>`}
+    <div class="metric-row">${(b.items||[]).map(i=>metric(i.n,i.l,i.cls)).join('')}</div>
+    ${b.insight?`<div class="reginsight" style="margin-top:12px">${b.insight}</div>`:''}
+    ${rows.length?pjTable(['Project','Frequency','Due','Status','Last done','Done 90 days / expected'],rows,12):`<div class="empty">No active projects assigned in Dynamics.</div>`}
+    ${BP_PROJECTS}
+    <p class="notenote">Read from Dynamics project notes since ${fmtDate(b.from)}. A completion = the Due Date moved forward (the "Record Updated" note); on time = moved on or before the old due date; behind = Due Date more than 3 days past. Score: on schedule 40 · on time 25 · cadence in the last 90 days (daily to monthly projects) 20 · work-log notes 15. Projects handed over in the last 30 days are shown but not graded. Check each item in Dynamics before the review.</p></div>`;
+}
+function campaignsCard(b,e){
+  if(!b) return '';
+  const acts=(b.acts||[]).map(a=>`<tr><td>${dynLink('campaignactivity',a.id,a.n)}</td><td>${a.c||''}</td><td class="date">${a.due?fmtDate(a.due):'—'}</td><td>${a.od>3?pjChip('bad',`${a.od} days past due`):a.od>0?pjChip('warn','due'):pjChip('good','on time')}</td></tr>`);
+  const camps=(b.campaigns||[]).map(c=>`<tr><td>${dynLink('campaign',c.id,c.n)}</td><td>${c.s||''}</td><td class="date">${c.end?fmtDate(c.end):'—'}</td><td>${c.cur?pjChip('good','current'):pjChip('warn',c.end?'past end date':'no end date')}</td></tr>`);
+  const lists=(b.lists||[]).map(l=>`<tr><td>${dynLink('list',l.id,l.n)}</td><td style="text-align:center">${l.m}</td><td class="date">${fmtDate(l.c)}</td><td class="date">${l.u?fmtDate(l.u):'not used'}</td></tr>`);
+  const p=b.parts||{};
+  return `<div class="card" id="campcard">${pjGradeHead('Campaigns — campaign activities, marketing lists and calls',b)}
+    ${b.score!=null?`<div class="pjscore">Score ${b.score} / 100 — worked through ${p.followThrough}% · activities on time ${p.activities}% · campaigns current ${p.campaigns}% · momentum ${p.momentum}%</div>`:`<div class="pjscore">Not graded: fewer than 20 campaign calls and visits since ${fmtDate(b.from)}.</div>`}
+    <div class="metric-row">${(b.items||[]).map(i=>metric(i.n,i.l,i.cls)).join('')}</div>
+    ${b.insight?`<div class="reginsight" style="margin-top:12px">${b.insight}</div>`:''}
+    ${acts.length?`<h3 style="margin-top:14px">Open campaign activities</h3>`+pjTable(['Campaign activity','Campaign','Due','Status'],acts,8):''}
+    ${camps.length?`<details class="pjmore"><summary>Open campaigns (${camps.length})</summary>${pjTable(['Campaign','Status','End','Check'],camps,100)}</details>`:''}
+    ${lists.length?`<details class="pjmore"><summary>Marketing lists built since ${fmtDate(b.from)} (${lists.length})</summary>${pjTable(['Marketing list','Accounts','Created','Last used'],lists,100)}</details>`:''}
+    ${BP_CAMPAIGNS}
+    <p class="notenote">Read from Dynamics campaigns, campaign activities, marketing lists and the phone calls, appointments and emails tied to campaign activities since ${fmtDate(b.from)}. Worked through = done ÷ (done + cancelled + open over 30 days); open calls pushed to a later date still count as open. Score: worked through 40 · campaign activities on time 25 · campaigns current 15 · activity in the last 90 days 20. Test records are left out. Check each item in Dynamics before the review.</p></div>`;
+}
+// v1 profiles are not escaped on load (escDeep runs for v2 only): escape the layer here for them
+function layerCards(rv,e){
+  const v2=(rv.v||1)>=2, pj=rv.projects?(v2?rv.projects:escDeep(rv.projects)):null, cp=rv.campaigns?(v2?rv.campaigns:escDeep(rv.campaigns)):null;
+  if(!pj&&!cp) return '';
+  const salesFirst=cp&&['outside','discovery'].includes(String(rv.role||''));
+  return salesFirst? campaignsCard(cp,e)+projectsCard(pj,e) : projectsCard(pj,e)+campaignsCard(cp,e);
+}
 async function openDetail(id){
   const e = DATA.active.find(x=>x.id===id) || DATA.departed.find(x=>x.id===id); if(!e) return;
   const dv=$('#detailview');
@@ -271,13 +342,14 @@ async function openDetail(id){
   if(e.end) html+=`<div class="departbanner"><b>${e.reason||'Departed'} — last day ${fmtDate(e.end)}.</b> Kept for records; no longer on the active roster.</div>`;
   if(rv){
     const nextRev=row.review_date?`${fmtDate(row.review_date)}${row.review_kind?' · '+esc(row.review_kind):''}`:'not set';
-    if(rv.draft) html+=`<div class="departbanner" style="border-color:var(--line)">Draft review profile prepared by Claude from Dynamics (${esc(rv.built||'')}; data ${fmtDate(rv.window&&rv.window.from)} – ${fmtDate(rv.window&&rv.window.to)}).${rv.synced?` Attendance, error log, Very Awesomes, training, Departments and the review date re-synced from Dynamics ${fmtTs(rv.synced)}; the written assessment, insights and notes are as of ${esc(rv.built||'the build')}.`:''} Check each item in Dynamics before the meeting.</div>`;
+    if(rv.draft) html+=`<div class="departbanner" style="border-color:var(--line)">Draft review profile prepared by Claude from Dynamics (${esc(rv.built||'')}; data ${fmtDate(rv.window&&rv.window.from)} – ${fmtDate(rv.window&&rv.window.to)}).${rv.synced?` Attendance, error log, Very Awesomes, training, projects, campaigns, Departments and the review date re-synced from Dynamics ${fmtTs(rv.synced)}; the written assessment, insights and notes are as of ${esc(rv.built||'the build')}.`:''} Check each item in Dynamics before the meeting.</div>`;
     if(rv.flags&&rv.flags.length) html+=`<div class="departbanner"><b>Check before the review</b><ul style="margin:6px 0 0 18px;padding:0">${rv.flags.map(f=>`<li>${f}</li>`).join('')}</ul></div>`;
     html+=`<div class="card"><p class="empname">${esc(e.first)} ${esc(e.last)}</p><p class="emprole">${esc(e.title)} &middot; ${esc(e.dept)} &middot; <a href="mailto:${esc(e.email||'')}">${esc(e.email||'')}</a></p>
       ${rv.goal?`<div class="goal"><b>Role &amp; goal</b>${rv.goal}</div>`:''}
       <div class="facts"><div><span>Start</span><b>${fmtDate(e.start)}</b></div><div><span>Tenure</span><b>${e.tenure}</b></div><div><span>P21 role</span><b>${e.p21||'—'}</b></div><div><span>Next review</span><b>${nextRev}</b></div></div>
       ${rv.departments&&rv.departments.length?`<div class="dept-badges" style="margin-top:10px">${rv.departments.map(x=>`<span class="deptbadge ${x===rv.home?'cur':''}">${x}</span>`).join(' ')}</div>`:''}
       <div style="margin-top:12px;font-size:12.5px;color:var(--muted);"><b style="color:var(--ink)">Review status:</b> ${rv.reviewStatus||''}</div></div>`;
+    html+=layerCards(rv,e);
     html+=kpiBlock(rv.kpis);
     if(rv.territory) html+=`<div class="card"><h3>Territory ${rv.territory.code}</h3><div class="reginsight">${rv.territory.note}</div></div>`;
     if(rv.regInsight||(e.reg&&e.reg.total)) html+=`<div class="card"><h3>Ship Register</h3>${rv.regInsight?`<div class="reginsight">${rv.regInsight}</div>`:''}${e.reg&&e.reg.total?fmtReg(e.reg)+dailyTable(e.reg):''}</div>`;
@@ -361,5 +433,5 @@ document.querySelectorAll('.fbtb').forEach(btn=>{
   btn.addEventListener('click',(ev)=>{ ev.preventDefault(); $('#fbtext').focus(); try{ document.execCommand(btn.dataset.cmd,false,null); }catch(e){} });
 });
 
-$('#foot').innerHTML=`Live from Dynamics 365 via a gated Supabase layer (HR-only). Employee, team and directory data refresh nightly; the Ship Register is loaded monthly; review profiles are prepared from Dynamics, re-synced on the 1st of every month or with Sync now, and served only to signed-in HR viewers. Access is limited to the HR allow-list. Picking accuracy normalizes NVA errors against handling volume. Name mapping notes: register "Suzie" → Elrica Barrett and the single "Kevin" picker → Kevin Blair are unconfirmed; CINDY/MERRYL share order code 675. — Fluidseal HR Portal`;
+$('#foot').innerHTML=`Live from Dynamics 365 via a gated Supabase layer (HR-only). Employee, team and directory data refresh nightly; the Ship Register is loaded monthly; review profiles are prepared from Dynamics, re-synced on the 1st of every month or with Sync now, and served only to signed-in HR viewers. Access is limited to the HR allow-list. Picking accuracy normalizes NVA errors against handling volume. Projects (back office) and Campaigns (outside sales) are read from Dynamics project notes, campaign activities, marketing lists and the calls tied to them. Name mapping notes: register "Suzie" → Elrica Barrett and the single "Kevin" picker → Kevin Blair are unconfirmed; CINDY/MERRYL share order code 675. — Fluidseal HR Portal`;
 boot();
