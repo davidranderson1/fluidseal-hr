@@ -223,11 +223,13 @@ function renderOrders(){
   $('#recon').innerHTML='<thead><tr><th>Month</th><th class="num">Orders in Dynamics</th><th class="num">Invoiced (Financial Lines)</th><th class="num">Gap</th><th class="num">Gap %</th><th>Status and likely cause</th></tr></thead><tbody>'+rows.map(r=>`<tr><td class="nw">${new Date(r.m+'-15T12:00:00').toLocaleDateString('en-CA',{month:'short',year:'numeric'})}</td><td class="num">${money(r.o)} <span class="note">(${r.c})</span></td><td class="num">${money(r.f)}</td><td class="num ${r.g<0?'neg':''}">${money(r.g)}</td><td class="num">${r.p==null?'—':(r.p>=0?'+':'')+r.p+'%'}</td><td>${r.ok?pill('good'):pill(r.p!=null&&Math.abs(r.p)>25?'crit':'warn')} <span class="note">${r.ok?'Within 10%':r.g<0?'Invoiced more than ordered in Dynamics: orders keyed only in P21, missing values, or earlier orders invoiced':'Ordered in Dynamics but not yet invoiced, or a duplicate order record'}</span></td></tr>`).join('')+'</tbody>';
 }
 function renderTime(){
-  const T=D.tt;const keys=(D.ttorder||Object.keys(T)).filter(k=>T[k]);
-  if(!keys.length){$('#ttbl').innerHTML='<tbody><tr><td class="note">No time tracking records for you in Dynamics.</td></tr></tbody>';return;}
+  /* Each dashboard shows only its own person; the All dashboard shows the dashboard people side by side. */
+  const T=D.tt, pk=scope().pk;
+  const keys=pk?(T[pk]?[pk]:[]):PEOPLE.map(p=>p.k).filter(k=>T[k]);
+  $('#ttlede').textContent=pk?`Time tracking for ${P.n}. Some people log exceptions only (late, absent, vacation), not daily sign-in and sign-out, so day length may be blank.`:'Time tracking for each dashboard, side by side. Some people log exceptions only (late, absent, vacation), not daily sign-in and sign-out, so their day lengths cannot be compared.';
+  if(!keys.length){$('#ttbl').innerHTML=`<tbody><tr><td class="note">No time tracking records${pk?' for '+esc(P.n):''} in Dynamics.</td></tr></tbody>`;return;}
   const rows=[[`Days with a sign-in logged since ${FYL}`,k=>T[k].sd],['Sign-ins flagged Late',k=>T[k].late],['Days flagged Absent',k=>T[k].ab],['Leaving early',k=>T[k].ea],['Median sign-in time',k=>T[k].mi||'—'],['Median day, sign-in to sign-out',k=>T[k].dh?T[k].dh+' h':'—'],[`Time tracking records since ${FYL}`,k=>T[k].rec]];
-  const sel=scope().pk;
-  $('#ttbl').innerHTML=`<thead><tr><th>Time tracking</th>${keys.map(k=>`<th class="num" style="${k===sel?'background:var(--yellow);color:#231F20':''}">${esc(nm(k))}${k===D.ttref?' <span class="note">(reference)</span>':''}</th>`).join('')}</tr></thead><tbody>`+rows.map(([l,f])=>`<tr><td>${l}</td>${keys.map(k=>`<td class="num">${f(k)}</td>`).join('')}</tr>`).join('')+'</tbody>';
+  $('#ttbl').innerHTML=`<thead><tr><th>Time tracking</th>${keys.map(k=>`<th class="num">${esc(nm(k))}</th>`).join('')}</tr></thead><tbody>`+rows.map(([l,f])=>`<tr><td>${l}</td>${keys.map(k=>`<td class="num">${f(k)}</td>`).join('')}</tr>`).join('')+'</tbody>';
 }
 function renderAll(){renderControls();const dv=data();renderButtons(dv);renderTable();renderKPI();renderTiers();renderActivity();renderOrders();renderTime();}
 /* ---------- export: portal admin only (checked on the server: the data call says admin) ---------- */
@@ -236,7 +238,7 @@ function exportList(){
   if(!LAST||!WHO||!WHO.admin) return; const {rows,cols}=LAST;
   const head=cols.map(c=>c[1]).concat(['Dynamics id']);
   const lines=[head.map(csvq).join(',')].concat(rows.map(x=>cols.map(([k])=>{let v=val(x,k);if(k==='n'&&VIEW.ent==='acc'&&x.c) v=v+' ('+x.c+')';return csvq(v);}).concat([csvq(x.i||'')]).join(',')));
-  const blob=new Blob(['﻿'+lines.join('\r\n')],{type:'text/csv'});const a=document.createElement('a');
+  const blob=new Blob([String.fromCharCode(0xFEFF)+lines.join('\r\n')],{type:'text/csv'});const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);a.download=`territory-${P.k}-${OPT[0]}-${VIEW.ent}-${VIEW.flag}-${TODAY}.csv`;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);
 }
 /* ---------- dates ---------- */
