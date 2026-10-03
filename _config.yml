@@ -1,0 +1,11 @@
+# GitHub Pages (Jekyll) build settings for hr.fluidsealab.com.
+# Files listed here stay in the repository for Claude agents but are NOT published on the website.
+# Added 2026-10-03 after an audit found internal notes served publicly.
+exclude:
+  - README.md
+  - CLAUDE.md
+  - "HANDOFF-*.md"
+  - NEXT-SESSION-HANDOFF.md
+  - changes/
+  - .claude/
+  - .github/
